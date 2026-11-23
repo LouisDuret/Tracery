@@ -772,16 +772,25 @@ l'arête extérieure du chambranle.
   et la grille y est centrée ; losanges de hauteur 1,45 à 1,75 fois leur
   largeur.
 - **Appui** mouluré (huit fois sur dix, toujours sous des pinacles), hors
-  de la forme, d'après les appuis de pierre des logis : de haut en bas,
-  une tablette à boudin (relief 3 d'un seul tenant : le biseau du rendu
-  pierre en arrondit le profil) terminée par des becs en demi-cercle,
-  renflés en bossage une fois sur trois ; une gorge sous le boudin ; la
-  face en retrait (plaque de fond, relief 1) ; un listel (relief 2) plus
-  court que la tablette. Hauteur totale 1,1 à 1,45 fois le chambranle,
-  dont la moitié environ pour la tablette. Sous une baie large, un joint
-  de pose sous chaque meneau (sept fois sur dix). Un boudin en deux
-  niveaux (crête en relief 3 sur une tablette en relief 2) a été écarté :
-  la crête portait une ombre qui donnait un profil en escalier.
+  de la forme, sous l'arête basse du chambranle, d'après un profil modelé
+  sous Blender par le commanditaire. Vu de face, de haut en bas (hauteur
+  totale H = 1,25 à 1,6 f) : une tablette (≈ 0,47 H, relief 3) qui
+  déborde la face et se termine par un nez ovale ; un rebord mince sous
+  la tablette (relief 2) ; un congé creux (quart de cercle de centre hors
+  de la pierre) qui rentre jusqu'au nu de la face ; la face (relief 1) ;
+  une baguette (arc par trois points, relief 2) ; un filet. Chaque
+  moulure est une bande horizontale dont le bout gauche suit le profil
+  et le bout droit en est le miroir : en épure, chaque changement de
+  profil donne un trait horizontal, comme les arêtes du modèle.
+  Le nez est construit au compas : un arc de tête (rayon ¾ de la
+  demi-hauteur de la tablette) et deux arcs de flanc qui lui sont
+  tangents et passent par les arêtes de la tablette, qu'ils rejoignent en
+  biais. Deux méridiens (le même nez, moins saillant, posé plus loin sur
+  la tablette) disent l'arrondi en épure ; ils ne changent rien au rendu
+  pierre. Sous une baie large, un joint de pose sous chaque meneau (sept
+  fois sur dix). Écartés : un appui en plaques empilées (tablette à becs
+  en demi-cercle, listel) qui ne disait pas le profil en épure, et un
+  boudin en deux niveaux dont la crête portait une ombre en escalier.
 - **Larmier** à retours terminés par deux culots ronds (un peu plus d'une
   fois sur deux, sans accolade), hors de la forme ; seulement pour une
   forme rectangulaire.

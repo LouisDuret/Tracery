@@ -61,20 +61,51 @@ pub(crate) fn round_top_rect(x0: f64, y0: f64, x1: f64, y1: f64, r: f64) -> Loop
     Loop::new(segs)
 }
 
-/// Bandeau à bouts en demi-cercle (de `xa` à `xb`, de `ya` à `yb`),
-/// parcouru dans le sens trigonométrique.
-fn pill(xa: f64, xb: f64, ya: f64, yb: f64) -> Loop {
-    let r = 0.5 * (yb - ya);
-    let yc = 0.5 * (ya + yb);
-    if xb - xa <= 2.0 * r {
-        return rect(xa, ya, xb, yb);
+/// Bande horizontale symétrique : `left` est le profil de son bout gauche,
+/// du haut vers le bas ; le bout droit en est le miroir par `m`. Parcourue
+/// dans le sens trigonométrique.
+fn band_loop(left: Vec<Seg>, m: &Xf) -> Loop {
+    let (Some(first), Some(last)) = (left.first(), left.last()) else {
+        return Loop::new(Vec::new());
+    };
+    let (lt, lb) = (first.start(), last.end());
+    let right: Vec<Seg> = left
+        .iter()
+        .rev()
+        .map(|s| s.transform(m).reversed())
+        .collect();
+    let mut segs = left.clone();
+    segs.push(Seg::line(lb, m.apply(lb)));
+    segs.extend(right);
+    segs.push(Seg::line(m.apply(lt), lt));
+    Loop::new(segs).oriented(true)
+}
+
+/// Nez ovale d'une tablette d'appui, du haut (`xs`, `yt`) au bas (`xs`,
+/// `yb`), de saillie `a` : arc de tête (rayon trois quarts de la demi-hauteur)
+/// et deux arcs de flanc qui lui sont tangents en `phi` et qui passent par
+/// les arêtes de la tablette, qu'ils rejoignent en biais.
+fn nose(xs: f64, yt: f64, yb: f64, a: f64, phi: f64) -> Vec<Seg> {
+    let b = 0.5 * (yt - yb);
+    let yc = 0.5 * (yt + yb);
+    let (t, tb) = (P2::new(xs, yt), P2::new(xs, yb));
+    let r2 = (0.75 * b).min(0.6 * a);
+    let c2 = P2::new(xs - a + r2, yc);
+    let u = P2::new(cos(phi), sin(phi));
+    let p = c2 + u * r2;
+    let d = p - t;
+    let dt = dot(d, u);
+    if dt <= 1e-9 * b {
+        return vec![Seg::through(t, P2::new(xs - a, yc), tb)];
     }
-    Loop::new(vec![
-        Seg::line(P2::new(xa + r, ya), P2::new(xb - r, ya)),
-        Seg::arc(P2::new(xb - r, yc), r, -FRAC_PI_2, PI),
-        Seg::line(P2::new(xb - r, yb), P2::new(xa + r, yb)),
-        Seg::arc(P2::new(xa + r, yc), r, FRAC_PI_2, PI),
-    ])
+    let r1 = dot(d, d) / (2.0 * dt);
+    let c1 = p - u * r1;
+    let flip = |q: P2| P2::new(q.x, 2.0 * yc - q.y);
+    vec![
+        Seg::arc_from_to(c1, t, p, true),
+        Seg::arc_from_to(c2, p, flip(p), true),
+        Seg::arc_from_to(flip(c1), flip(p), tb, true),
+    ]
 }
 
 /// Dilatation (`d > 0`) ou érosion (`d < 0`) : plus grande composante.
@@ -385,47 +416,79 @@ pub fn generate_mullion(
     let m_x = Xf::mirror_x(xm);
 
     // ------------------------------------------------------------ appui
-    // Profil, de haut en bas : tablette à boudin terminée en becs arrondis,
-    // gorge sous le boudin, face en retrait, listel, plaque de fond ; un
-    // joint sous chaque meneau d'un long appui.
+    // Profil vu de face, de haut en bas (ADR-30) : tablette à nez ovale
+    // (deux arcs de flanc et un arc de tête) marquée de deux méridiens,
+    // rebord sous la tablette, congé creux qui rentre jusqu'au nu de la
+    // face, face, baguette et filet du bas. Chaque moulure est une bande
+    // horizontale dont les bouts suivent le profil, en miroir sur l'axe.
     let mut y_floor = y0;
     if rect_shape && (pinnacles || unif(&mut rng) < 0.8) {
         let p_sill = out.node("Appui");
-        let o = if pinnacles {
-            x0 - (x_pin - 0.5 * pw) + 0.15 * f
+        let hh = f * unif_in(&mut rng, 1.25, 1.6); // hauteur totale
+        let th = hh * unif_in(&mut rng, 0.45, 0.5); // tablette
+        let a = th * unif_in(&mut rng, 0.65, 0.8); // saillie du nez
+        let pt = hh * unif_in(&mut rng, 0.18, 0.24); // tablette au-delà de la face
+        let phi = unif_in(&mut rng, 112.0, 118.0) * PI / 180.0;
+        // nu de la face : sous les pinacles, le nez les déborde
+        let op = if pinnacles {
+            (x0 - (x_pin - 0.5 * pw) + 0.15 * f - pt - a).max(0.15 * f)
         } else {
-            f * unif_in(&mut rng, 0.4, 0.65)
+            f * unif_in(&mut rng, 0.15, 0.35)
         };
-        let yt = y0 + 0.3 * f; // dessus de la tablette
-        let hh = f * unif_in(&mut rng, 1.1, 1.45); // hauteur totale
-        let yb = yt - hh;
-        let th = hh * unif_in(&mut rng, 0.48, 0.56); // hauteur de la tablette
+        let xp = x0 - op;
+        let xs = xp - pt; // naissance du nez
+        let yt = y0;
         let y_tab = yt - th;
-        let (xa, xb) = (x0 - o, x1 + o);
-        // plaque de fond, un peu en retrait des becs
-        let op = o - 0.18 * th;
-        out.relief(&p_sill, 1, [rect_r(x0 - op, yb, x1 + op, y_tab + 0.1 * th)]);
-        // tablette : becs en demi-cercle, ou renflés en bossage
-        let mut tab = vec![Region::simple(pill(xa, xb, y_tab, yt))];
-        let boss = unif(&mut rng) < 0.35;
-        if boss {
-            let rb = 0.54 * th;
-            let yc = y_tab + 0.5 * th;
-            for xc in [xa + rb, xb - rb] {
-                tab = union(&tab, &Region::circle(P2::new(xc, yc), rb));
-            }
+        let y_lip = y_tab - 0.03 * hh;
+        let rc = 0.1 * hh;
+        let y_cv = y_lip - 0.12 * hh;
+        let yb = yt - hh;
+        let (y_bt, y_bb) = (yb + 0.14 * hh, yb + 0.035 * hh);
+        let pb = 0.045 * hh;
+        let band = |left: Vec<Seg>| Region::simple(band_loop(left, &m_x));
+        // tablette, puis deux méridiens qui disent l'arrondi du nez
+        out.relief(&p_sill, 3, [band(nose(xs, yt, y_tab, a, phi))]);
+        for k in [1.0, 2.0] {
+            let nk = nose(xs + 0.2 * a * k, yt, y_tab, a * (1.0 - 0.36 * k), phi);
+            out.relief(&p_sill, 3, [band(nk)]);
         }
-        // boudin : la tablette entière au niveau le plus saillant, son
-        // profil arrondi venant du biseau du rendu
-        out.relief(&p_sill, 3, tab);
-        // gorge sous le boudin
-        let g = 0.09 * hh;
-        out.creux(&p_sill, 1, [rect_r(x0 - op, y_tab - g, x1 + op, y_tab)]);
-        // listel au bas de la face, moins long que la tablette
-        let ol = o - unif_in(&mut rng, 0.45, 0.7) * th;
-        let yl = yb + hh * unif_in(&mut rng, 0.16, 0.22);
-        let hl = hh * unif_in(&mut rng, 0.11, 0.15);
-        out.relief(&p_sill, 2, [rect_r(x0 - ol, yl, x1 + ol, yl + hl)]);
+        // rebord sous la tablette
+        out.relief(
+            &p_sill,
+            2,
+            [band(vec![Seg::line(
+                P2::new(xs + 0.01 * hh, y_tab),
+                P2::new(xs + 0.03 * hh, y_lip),
+            )])],
+        );
+        // congé creux : quart de cercle de centre hors de la pierre
+        let cc = P2::new(xp - rc, y_lip - rc);
+        let cove = band(vec![
+            Seg::arc_from_to(cc, P2::new(xp - rc, y_lip), P2::new(xp, y_lip - rc), false),
+            Seg::line(P2::new(xp, y_lip - rc), P2::new(xp, y_cv)),
+        ]);
+        out.relief(&p_sill, 1, [cove.clone()]);
+        out.creux(&p_sill, 1, [cove]);
+        // face, baguette, filet
+        out.relief(
+            &p_sill,
+            1,
+            [band(vec![Seg::line(P2::new(xp, y_cv), P2::new(xp, y_bt))])],
+        );
+        out.relief(
+            &p_sill,
+            2,
+            [band(vec![Seg::through(
+                P2::new(xp, y_bt),
+                P2::new(xp - pb, 0.5 * (y_bt + y_bb)),
+                P2::new(xp, y_bb),
+            )])],
+        );
+        out.relief(
+            &p_sill,
+            1,
+            [band(vec![Seg::line(P2::new(xp, y_bb), P2::new(xp, yb))])],
+        );
         // joints de pose sous les meneaux d'un long appui
         if w > 0.75 * h && !x_mul.is_empty() && unif(&mut rng) < 0.7 {
             let jw = 0.5 * (0.035 * f).max(0.003 * u);
