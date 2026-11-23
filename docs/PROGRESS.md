@@ -133,6 +133,10 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
 - v0.7.4 : croisées à accolade (ADR-30) : accolade en biarc (arcs de
   cercle) comme sur les portes, crochets en chou frisé, fleuron, pinacles
   latéraux ; favorisée sur les baies étroites, évitée sur les larges.
+- v0.7.5 : appui des croisées mouluré (ADR-30) : tablette à boudin aux
+  becs arrondis (parfois renflés en bossage), gorge, face en retrait,
+  listel et plaque de fond ; joints de pose sous les meneaux d'une baie
+  large (planche `v07_appuis.png`).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 
@@ -148,6 +152,7 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
 | `v05_portes.png` | Portes : quatre seeds en mode pierre et une épure |
 | `v06_ferronneries.png` | Ferronneries : vantaux simples et doubles, arcs et rectangles, une épure |
 | `v062_ferronneries.png` | Ferronneries v0.6.2 : fer fin, rameaux récursifs (quatre portes, seeds 1, 3, 5) |
+| `v07_appuis.png` | Appuis moulurés v0.7.5 : baie carrée 1600 × 1500 et baie 1000 × 1700, détail du profil |
 | `v07_croisees.png` | Fenêtres à meneaux : baie 1000 × 1700 (seeds 0 à 7), baie étroite 800 × 1500 (seeds 0 à 3) et baie carrée 1500 × 1500 (seeds 0 à 3) |
 
 ## Écarts et points à arbitrer

@@ -61,6 +61,22 @@ pub(crate) fn round_top_rect(x0: f64, y0: f64, x1: f64, y1: f64, r: f64) -> Loop
     Loop::new(segs)
 }
 
+/// Bandeau à bouts en demi-cercle (de `xa` à `xb`, de `ya` à `yb`),
+/// parcouru dans le sens trigonométrique.
+fn pill(xa: f64, xb: f64, ya: f64, yb: f64) -> Loop {
+    let r = 0.5 * (yb - ya);
+    let yc = 0.5 * (ya + yb);
+    if xb - xa <= 2.0 * r {
+        return rect(xa, ya, xb, yb);
+    }
+    Loop::new(vec![
+        Seg::line(P2::new(xa + r, ya), P2::new(xb - r, ya)),
+        Seg::arc(P2::new(xb - r, yc), r, -FRAC_PI_2, PI),
+        Seg::line(P2::new(xb - r, yb), P2::new(xa + r, yb)),
+        Seg::arc(P2::new(xa + r, yc), r, FRAC_PI_2, PI),
+    ])
+}
+
 /// Dilatation (`d > 0`) ou érosion (`d < 0`) : plus grande composante.
 fn grow(r: &Region, d: f64) -> Option<Region> {
     offset_region(r, -d)
@@ -369,28 +385,57 @@ pub fn generate_mullion(
     let m_x = Xf::mirror_x(xm);
 
     // ------------------------------------------------------------ appui
+    // Profil, de haut en bas : tablette à boudin terminée en becs arrondis,
+    // gorge sous le boudin, face en retrait, listel, plaque de fond ; un
+    // joint sous chaque meneau d'un long appui.
     let mut y_floor = y0;
     if rect_shape && (pinnacles || unif(&mut rng) < 0.8) {
         let p_sill = out.node("Appui");
         let o = if pinnacles {
             x0 - (x_pin - 0.5 * pw) + 0.15 * f
         } else {
-            f * unif_in(&mut rng, 0.35, 0.6)
+            f * unif_in(&mut rng, 0.4, 0.65)
         };
-        let hs = f * unif_in(&mut rng, 0.55, 0.8);
-        out.relief(&p_sill, 2, [rect_r(x0 - o, y0 - hs, x1 + o, y0 + 0.3 * f)]);
-        // goutte d'eau sous l'appui
-        out.creux(
-            &p_sill,
-            1,
-            [rect_r(
-                x0 - 0.6 * o,
-                y0 - 0.78 * hs,
-                x1 + 0.6 * o,
-                y0 - 0.7 * hs,
-            )],
-        );
-        y_floor = y0 + 0.3 * f;
+        let yt = y0 + 0.3 * f; // dessus de la tablette
+        let hh = f * unif_in(&mut rng, 1.1, 1.45); // hauteur totale
+        let yb = yt - hh;
+        let th = hh * unif_in(&mut rng, 0.48, 0.56); // hauteur de la tablette
+        let y_tab = yt - th;
+        let (xa, xb) = (x0 - o, x1 + o);
+        // plaque de fond, un peu en retrait des becs
+        let op = o - 0.18 * th;
+        out.relief(&p_sill, 1, [rect_r(x0 - op, yb, x1 + op, y_tab + 0.1 * th)]);
+        // tablette : becs en demi-cercle, ou renflés en bossage
+        let mut tab = vec![Region::simple(pill(xa, xb, y_tab, yt))];
+        let boss = unif(&mut rng) < 0.35;
+        if boss {
+            let rb = 0.54 * th;
+            let yc = y_tab + 0.5 * th;
+            for xc in [xa + rb, xb - rb] {
+                tab = union(&tab, &Region::circle(P2::new(xc, yc), rb));
+            }
+        }
+        // boudin : la tablette entière au niveau le plus saillant, son
+        // profil arrondi venant du biseau du rendu
+        out.relief(&p_sill, 3, tab);
+        // gorge sous le boudin
+        let g = 0.09 * hh;
+        out.creux(&p_sill, 1, [rect_r(x0 - op, y_tab - g, x1 + op, y_tab)]);
+        // listel au bas de la face, moins long que la tablette
+        let ol = o - unif_in(&mut rng, 0.45, 0.7) * th;
+        let yl = yb + hh * unif_in(&mut rng, 0.16, 0.22);
+        let hl = hh * unif_in(&mut rng, 0.11, 0.15);
+        out.relief(&p_sill, 2, [rect_r(x0 - ol, yl, x1 + ol, yl + hl)]);
+        // joints de pose sous les meneaux d'un long appui
+        if w > 0.75 * h && !x_mul.is_empty() && unif(&mut rng) < 0.7 {
+            let jw = 0.5 * (0.035 * f).max(0.003 * u);
+            let joints: Vec<Region> = x_mul
+                .iter()
+                .map(|&x| rect_r(x - jw, yb, x + jw, yt))
+                .collect();
+            out.creux(&p_sill, 1, joints);
+        }
+        y_floor = yt;
     }
 
     // --------------------------------------------------------- accolade

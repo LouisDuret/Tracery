@@ -771,9 +771,20 @@ l'arête extérieure du chambranle.
   (25 %) ou verre uni (20 %). Le pas est ajusté à la largeur de chaque jour
   et la grille y est centrée ; losanges de hauteur 1,45 à 1,75 fois leur
   largeur.
-- **Appui** saillant avec goutte d'eau (huit fois sur dix) et **larmier** à
-  retours terminés par deux culots ronds (un peu plus d'une fois sur deux),
-  hors de la forme ; seulement pour une forme rectangulaire.
+- **Appui** mouluré (huit fois sur dix, toujours sous des pinacles), hors
+  de la forme, d'après les appuis de pierre des logis : de haut en bas,
+  une tablette à boudin (relief 3 d'un seul tenant : le biseau du rendu
+  pierre en arrondit le profil) terminée par des becs en demi-cercle,
+  renflés en bossage une fois sur trois ; une gorge sous le boudin ; la
+  face en retrait (plaque de fond, relief 1) ; un listel (relief 2) plus
+  court que la tablette. Hauteur totale 1,1 à 1,45 fois le chambranle,
+  dont la moitié environ pour la tablette. Sous une baie large, un joint
+  de pose sous chaque meneau (sept fois sur dix). Un boudin en deux
+  niveaux (crête en relief 3 sur une tablette en relief 2) a été écarté :
+  la crête portait une ombre qui donnait un profil en escalier.
+- **Larmier** à retours terminés par deux culots ronds (un peu plus d'une
+  fois sur deux, sans accolade), hors de la forme ; seulement pour une
+  forme rectangulaire.
 - **Autres formes** (arc, cercle, contour libre) : la baie est la forme
   rétrécie de f, la croix la partage de la même façon ; pas d'arrondi, de
   bases, d'appui ni de larmier.
