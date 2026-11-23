@@ -164,6 +164,8 @@ const WALL: [u8; 3] = [222, 212, 190];
 /// Bois des vantaux (chêne grisé) et fer forgé (ADR-26).
 const WOOD: [u8; 3] = [146, 118, 88];
 const IRON: [u8; 3] = [64, 56, 50];
+/// Plombs des vitreries (ADR-30).
+const LEAD: [u8; 3] = [118, 116, 112];
 
 /// Ornement de fer (ferronnerie : niveaux 2 et plus) ?
 fn is_iron(d: &Design, o: &engine::Ornament) -> bool {
@@ -724,12 +726,19 @@ fn render_stone_layered(pm: &mut Pixmap, ds: &[&Design], v: &View, transparent: 
         || coverage(&doors, v, FillRule::Winding),
         || coverage(&glass_regs, v, FillRule::EvenOdd),
     );
+    let floor = -0.6 * u;
+    // plombs : au fond de la baie, à peine au-dessus du verre, gris de plomb
+    let mut lead_a = vec![0f32; if top_cov.is_empty() { 0 } else { n }];
     if !top_cov.is_empty() {
-        for (va, tc) in void_a.iter_mut().zip(&top_cov) {
-            *va *= 1.0 - tc;
+        for i in 0..n {
+            let tc = top_cov[i];
+            if tc > 0.0 && void_a[i] > 0.5 {
+                hmap[i] = floor + 0.08 * u;
+                lead_a[i] = tc;
+            }
+            void_a[i] *= 1.0 - tc;
         }
     }
-    let floor = -0.6 * u;
     for i in 0..n {
         if void_a[i] > 0.5 {
             hmap[i] = floor;
@@ -905,6 +914,9 @@ fn render_stone_layered(pm: &mut Pixmap, ds: &[&Design], v: &View, transparent: 
                     let mut base_c = STONE[k] as f64 * (1.0 - wa) + WALL[k] as f64 * wa;
                     base_c = base_c * (1.0 - bo) + WOOD[k] as f64 * grain * bo;
                     base_c = base_c * (1.0 - fe) + IRON[k] as f64 * fe;
+                    if let Some(&la) = lead_a.get(i) {
+                        base_c = base_c * (1.0 - la as f64) + LEAD[k] as f64 * la as f64;
+                    }
                     let c = (base_c * shade + 255.0 * spec * fe).min(255.0);
                     col[k] = col[k] * (1.0 - a_st) + c * a_st;
                 }

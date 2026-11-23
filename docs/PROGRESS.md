@@ -120,6 +120,10 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
     options `--meneaux`, `--croisee`, `--arrondi` de la ligne de commande ;
   - le rendu pierre et les épures montrent les plombs devant le vide des
     jours (planche `v07_croisees.png`).
+- v0.7.1 : croisées corrigées (ADR-30) : meneaux et traverse en relief
+  positif (croix et baguette en saillie, filet central), vitres et plombs
+  au fond de la baie, plombs gris ; arrondis des angles hauts plus
+  discrets (0,14 à 0,24 largeur de jour).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 

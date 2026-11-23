@@ -719,15 +719,20 @@ l'arête extérieure du chambranle.
   jour), deux pour une baie très haute et étroite, une sinon, placée aux
   58–66 % de la hauteur : les jours hauts sont plus courts.
 - **Angles hauts arrondis** (`round_top` : oui, non, ou selon la seed avec
-  une chance sur 0,4) : quart de cercle de rayon 0,3 à 0,5 largeur de jour,
-  centre dans le point de construction. Seulement pour une forme
+  une chance sur 0,4) : quart de cercle de rayon 0,14 à 0,24 largeur de
+  jour (au plus 0,35 fois la hauteur des jours hauts ; v0.7.1, au lieu de
+  0,3 à 0,5, jugé trop prononcé), centre dans le point de construction. Seulement pour une forme
   rectangulaire ; les jours d'angle et leurs moulures suivent l'arrondi.
-- **Moulures** : listel (relief 2) et gorge (creux 1) le long de l'arête
-  extérieure ; autour de chaque jour, une baguette (dilatation de 0,24 m)
-  puis une gorge (jusqu'à 0,42 m), qui laissent un listel plat au milieu
-  du meneau et de la traverse.
+- **Reliefs (v0.7.1)** : meneaux et traverses sont en **relief positif**,
+  comme sur les relevés de Viollet-le-Duc, et les vitres au fond de la
+  baie. Le chambranle est le plan de fond (relief 1), avec listel (relief
+  2) et gorge (creux 1) le long de l'arête extérieure. La croix (relief 2)
+  et une baguette qui borde la baie (relief 2, largeur 0,3 m) avancent ;
+  un filet de 0,32 m au milieu des meneaux et de la traverse avance encore
+  (relief 3). La v0.7.0 taillait au contraire une gorge autour de chaque
+  jour, ce qui faisait lire la croix en creux.
 - **Bases** prismatiques au pied des meneaux (sept fois sur dix, forme
-  rectangulaire) : la moulure y meurt.
+  rectangulaire, relief 3) : le filet y meurt.
 - **Vitrerie** (plombs en relief 3) : losanges (55 %), petits carreaux
   (25 %) ou verre uni (20 %). Le pas est ajusté à la largeur de chaque jour
   et la grille y est centrée ; losanges de hauteur 1,45 à 1,75 fois leur
@@ -740,7 +745,9 @@ l'arête extérieure du chambranle.
   bases, d'appui ni de larmier.
 - **Rendu** : les reliefs de niveau 3 posés dans une baie (les plombs)
   passent devant le vide, dans le rendu pierre (`top_cov`) comme dans les
-  épures et le mode vitrail. Les portes n'ont pas de tels reliefs : leur
+  épures et le mode vitrail. En rendu pierre, ils restent au fond de la
+  baie (hauteur du vide + 0,08 u), en gris de plomb, et reçoivent l'ombre
+  du chambranle et de la croix (v0.7.1). Les portes n'ont pas de tels reliefs : leur
   rendu ne change pas.
 - **Déterminisme** : RNG ChaCha8 dérivé de la seed (sel `0x3E2E`) ; les
   génomes existants (sans `window = meneaux`) donnent le même résultat,

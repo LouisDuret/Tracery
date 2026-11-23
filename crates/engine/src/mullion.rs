@@ -8,8 +8,10 @@
 //!   jours hauts sont plus courts que les jours bas. Une baie basse et
 //!   large n'a que des meneaux, une baie très haute deux traverses.
 //! - **Chambranle** mouluré : listel et gorge le long de l'arête
-//!   extérieure ; autour de chaque jour, une baguette puis une gorge, qui
-//!   laissent un listel plat au milieu des meneaux et de la traverse.
+//!   extérieure, baguette en saillie le long de la baie.
+//! - **Croix en saillie** sur le chambranle, avec un filet plus saillant
+//!   au milieu des meneaux et de la traverse ; les vitres et leurs plombs
+//!   sont au fond de la baie.
 //! - **Angles hauts** droits ou arrondis (quart de cercle) : la baie et ses
 //!   moulures suivent l'arrondi.
 //! - **Bases** prismatiques au pied des meneaux, où meurent les moulures.
@@ -220,7 +222,7 @@ pub fn generate_mullion(
     let rounded = rect_shape && style.round_top.unwrap_or_else(|| unif(&mut rng) < 0.4);
     let r_top = if rounded {
         let top_h = y_tr.last().map_or(bh, |y| ob.max.y - y - 0.5 * mt);
-        (light_w * unif_in(&mut rng, 0.3, 0.5)).min(0.6 * top_h)
+        (light_w * unif_in(&mut rng, 0.14, 0.24)).min(0.35 * top_h)
     } else {
         0.0
     };
@@ -256,35 +258,48 @@ pub fn generate_mullion(
     cancelled()?;
 
     // ------------------------------------------------------- chambranle
-    let p_frame = out.node("Chambranle et croisée");
-    let mut stone = vec![shape.clone()];
-    for l in &lights {
-        stone = subtract(&stone, l);
-    }
-    out.relief(&p_frame, 1, stone);
-
-    // moulures : arête extérieure (listel, gorge) et pourtour des jours
+    // Le chambranle est le plan de fond (niveau 1). La croix et la baguette
+    // qui borde la baie sont en saillie (niveau 2), le filet de la croix
+    // plus encore (niveau 3) : meneaux et traverses avancent, les vitres
+    // sont au fond de la baie.
+    let p_frame = out.node("Chambranle");
+    out.relief(&p_frame, 1, subtract(std::slice::from_ref(&shape), &bay));
     let p_mould = out.node("Moulures");
+    // arête extérieure : listel et gorge
     if let (Some(a), Some(b)) = (grow(&shape, -0.14 * f), grow(&shape, -0.26 * f)) {
         out.relief(&p_mould, 2, subtract(std::slice::from_ref(&shape), &a));
         out.creux(&p_mould, 1, subtract(&[a], &b));
     }
-    let (g1, g2) = (0.24 * m, 0.42 * m);
-    for l in &lights {
-        let (Some(a), Some(b)) = (grow(l, g1), grow(l, g2)) else {
-            continue;
-        };
-        out.relief(&p_mould, 2, subtract(std::slice::from_ref(&a), l));
-        out.creux(&p_mould, 1, subtract(&[b], &a));
+    // baguette le long de la baie, au nu de la croix
+    if let Some(a) = grow(&bay, 0.3 * m) {
+        out.relief(&p_mould, 2, subtract(std::slice::from_ref(&a), &bay));
     }
+    let p_cross = out.node("Croisée");
+    let mut cross = vec![bay.clone()];
+    for l in &lights {
+        cross = subtract(&cross, l);
+    }
+    out.relief(&p_cross, 2, cross);
+    // filet au milieu des meneaux et de la traverse
+    let wf = 0.32 * m;
+    let mut fillets = Vec::new();
+    for &x in &x_mul {
+        let r = rect(x - 0.5 * wf, big.min.y, x + 0.5 * wf, big.max.y);
+        fillets.extend(intersect_loop(std::slice::from_ref(&bay), &r));
+    }
+    for &y in &y_tr {
+        let r = rect(big.min.x, y - 0.5 * wf, big.max.x, y + 0.5 * wf);
+        fillets.extend(intersect_loop(std::slice::from_ref(&bay), &r));
+    }
+    out.relief(&p_cross, 3, fillets);
     cancelled()?;
 
-    // bases au pied des meneaux
+    // bases au pied des meneaux, devant le filet
     if rect_shape && !x_mul.is_empty() && unif(&mut rng) < 0.7 {
         let p_base = out.node("Bases");
         let hb = m * unif_in(&mut rng, 1.0, 1.5);
         let regs: Vec<Region> = x_mul.iter().map(|&x| base(x, ob.min.y, m, hb)).collect();
-        out.relief(&p_base, 2, regs);
+        out.relief(&p_base, 3, regs);
     }
 
     // ------------------------------------------------------------ jours
