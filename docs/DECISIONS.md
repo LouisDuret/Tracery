@@ -698,3 +698,60 @@ ensuite.
   testé : aller-retour de chaque type, type de fenêtre retenu, formes
   admises, génome sans champ `window`.
 
+## ADR-30 — Fenêtres à meneaux et croisées (v0.7.0)
+
+**Contexte.** Le commanditaire veut le générateur du type « Fenêtre à
+meneaux et croisées » (ADR-29), d'après des croisées de logis de la fin du
+gothique : une croix de pierre simple ou double dans un contour, dont les
+angles hauts peuvent être arrondis.
+
+**Décision.** `engine::mullion::generate_mullion`, choisie par
+`StyleParams::window == Meneaux` (après `iron` et `door`). Elle produit un
+`Design` en relief (`door` vrai, comme les portes) : le rendu par niveaux,
+les traits vus (ADR-24) et l'arbre des objets sont réutilisés. La forme est
+l'arête extérieure du chambranle.
+- **Mesures** (fractions de la petite dimension u de la forme) : chambranle
+  f = 0,085 à 0,115 u ; meneau m = 0,62 à 0,78 f ; traverse ≈ m.
+- **Croisée** : réglage `cross` (auto, simple, double). En auto, deux
+  meneaux si la baie est plus large que haute (et une fois sur deux au-delà
+  de 0,75). Un meneau est retiré si un jour devient plus étroit que
+  1,6 m. Pas de traverse pour une baie basse (hauteur < 1,1 largeur de
+  jour), deux pour une baie très haute et étroite, une sinon, placée aux
+  58–66 % de la hauteur : les jours hauts sont plus courts.
+- **Angles hauts arrondis** (`round_top` : oui, non, ou selon la seed avec
+  une chance sur 0,4) : quart de cercle de rayon 0,3 à 0,5 largeur de jour,
+  centre dans le point de construction. Seulement pour une forme
+  rectangulaire ; les jours d'angle et leurs moulures suivent l'arrondi.
+- **Moulures** : listel (relief 2) et gorge (creux 1) le long de l'arête
+  extérieure ; autour de chaque jour, une baguette (dilatation de 0,24 m)
+  puis une gorge (jusqu'à 0,42 m), qui laissent un listel plat au milieu
+  du meneau et de la traverse.
+- **Bases** prismatiques au pied des meneaux (sept fois sur dix, forme
+  rectangulaire) : la moulure y meurt.
+- **Vitrerie** (plombs en relief 3) : losanges (55 %), petits carreaux
+  (25 %) ou verre uni (20 %). Le pas est ajusté à la largeur de chaque jour
+  et la grille y est centrée ; losanges de hauteur 1,45 à 1,75 fois leur
+  largeur.
+- **Appui** saillant avec goutte d'eau (huit fois sur dix) et **larmier** à
+  retours terminés par deux culots ronds (un peu plus d'une fois sur deux),
+  hors de la forme ; seulement pour une forme rectangulaire.
+- **Autres formes** (arc, cercle, contour libre) : la baie est la forme
+  rétrécie de f, la croix la partage de la même façon ; pas d'arrondi, de
+  bases, d'appui ni de larmier.
+- **Rendu** : les reliefs de niveau 3 posés dans une baie (les plombs)
+  passent devant le vide, dans le rendu pierre (`top_cov`) comme dans les
+  épures et le mode vitrail. Les portes n'ont pas de tels reliefs : leur
+  rendu ne change pas.
+- **Déterminisme** : RNG ChaCha8 dérivé de la seed (sel `0x3E2E`) ; les
+  génomes existants (sans `window = meneaux`) donnent le même résultat,
+  donc la version du générateur et les seeds dorées ne changent pas.
+
+**Vérification.** Tests : quatre et six jours, jours hauts plus courts,
+symétrie, arcs des angles arrondis, invariants EQ-01 à EQ-05 et
+déterminisme sur cinq formes (rectangles haut, large et étroit, arc,
+cercle) et six seeds. Planche `docs/planches/v07_croisees.png`.
+
+**À venir.** Décor d'accolade à crochets, fleuron et pinacles au-dessus
+de la croisée (comme sur les lucarnes et les baies des photos de
+référence) ; vitraux (ADR-29).
+

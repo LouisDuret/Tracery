@@ -91,6 +91,19 @@ pub enum WindowKind {
     Vitrail,
 }
 
+/// Croisée d'une fenêtre à meneaux (ADR-30).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CrossKind {
+    /// Selon les proportions de la baie.
+    #[default]
+    Auto,
+    /// Un meneau, une traverse : quatre jours.
+    Simple,
+    /// Deux meneaux, une traverse : six jours.
+    Double,
+}
+
 /// Paramètres de style exposés à l'utilisateur (§ 3.6), partie du génome.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -132,6 +145,10 @@ pub struct StyleParams {
     pub iron: bool,
     /// Type de fenêtre (ADR-29), retenu même quand la forme devient porte.
     pub window: WindowKind,
+    /// Fenêtre à meneaux : croisée simple ou double (ADR-30).
+    pub cross: CrossKind,
+    /// Fenêtre à meneaux : angles hauts arrondis (None : selon la seed).
+    pub round_top: Option<bool>,
 }
 
 impl Default for StyleParams {
@@ -156,6 +173,8 @@ impl Default for StyleParams {
             door: false,
             iron: false,
             window: WindowKind::Remplage,
+            cross: CrossKind::Auto,
+            round_top: None,
         }
     }
 }

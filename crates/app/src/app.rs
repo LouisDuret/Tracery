@@ -12,7 +12,7 @@ use crate::worker::{Msg, Worker};
 use egui::{Color32, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use engine::hidden::{DoorDrawing, door_drawing};
 use engine::seed::{parse_seed, splitmix64, to_base32};
-use engine::style::{Canon, Family, StyleParams, SymMode, TerminalMode};
+use engine::style::{Canon, CrossKind, Family, StyleParams, SymMode, TerminalMode};
 use engine::{CancelToken, Design, Genome, NodePath, TreeNode};
 use geom::fit::{FitOptions, fit_stroke};
 use geom::math::*;
@@ -372,7 +372,21 @@ impl TraceryApp {
         };
         if app.smoke.is_some() {
             app.doc = Document::default();
-            if std::env::var_os("TRACERY_SMOKE_FER").is_some() {
+            if std::env::var_os("TRACERY_SMOKE_MENEAUX").is_some() {
+                // croisée de pierre (ADR-30)
+                let prim = PrimSpec {
+                    kind: PrimKind::Rect,
+                    center: P2::ZERO,
+                    w: 1000.0,
+                    h: 1700.0,
+                    angle: 0.0,
+                };
+                let mut st = StyleParams::for_family(Family::Flamboyant);
+                st.window = engine::WindowKind::Meneaux;
+                app.doc.add("Croisée", Some(prim), None, st, 9);
+                app.sel.set(app.doc.shapes.first().map(|s| s.id));
+                app.fit_on_door = app.sel.primary;
+            } else if std::env::var_os("TRACERY_SMOKE_FER").is_some() {
                 // porte de bois à ferrures, deux vantaux (ADR-26)
                 let prim = PrimSpec {
                     kind: PrimKind::Rect,
@@ -2121,6 +2135,47 @@ impl TraceryApp {
         if !cur.has_generator() {
             ui.small("Générateur à venir : la forme est remplie d'un remplage en attendant.");
         }
+        if cur == Ouvrage::Meneaux {
+            // réglages de la croisée (ADR-30)
+            let st = &mut s.genome.style;
+            egui::Grid::new("croisee").num_columns(2).show(ui, |ui| {
+                ui.label("Croisée");
+                egui::ComboBox::from_id_salt("croisee_kind")
+                    .selected_text(match st.cross {
+                        CrossKind::Auto => "selon les proportions",
+                        CrossKind::Simple => "simple",
+                        CrossKind::Double => "double",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut st.cross,
+                            CrossKind::Auto,
+                            "selon les proportions",
+                        );
+                        ui.selectable_value(&mut st.cross, CrossKind::Simple, "simple")
+                            .on_hover_text("Un meneau et une traverse : quatre jours.");
+                        ui.selectable_value(&mut st.cross, CrossKind::Double, "double")
+                            .on_hover_text("Deux meneaux et une traverse : six jours.");
+                    });
+                ui.end_row();
+                ui.label("Angles hauts");
+                egui::ComboBox::from_id_salt("croisee_angles")
+                    .selected_text(match st.round_top {
+                        None => "selon la seed",
+                        Some(false) => "droits",
+                        Some(true) => "arrondis",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut st.round_top, None, "selon la seed");
+                        ui.selectable_value(&mut st.round_top, Some(false), "droits");
+                        ui.selectable_value(&mut st.round_top, Some(true), "arrondis");
+                    });
+                ui.end_row();
+            });
+            if !prim.is_some_and(|p| p.kind == PrimKind::Rect) {
+                ui.small("Angles arrondis, bases, appui et larmier : sur un rectangle seulement.");
+            }
+        }
         if want != cur {
             want.apply(&mut s.genome.style);
             if want.category() == Category::Porte {
@@ -2290,6 +2345,8 @@ impl TraceryApp {
                         door: keep.door,
                         iron: keep.iron,
                         window: keep.window,
+                        cross: keep.cross,
+                        round_top: keep.round_top,
                         candidates: keep.candidates,
                         temperature: keep.temperature,
                         ..StyleParams::for_family(st.family)

@@ -12,6 +12,7 @@ pub mod genome;
 pub mod grammar;
 pub mod hidden;
 pub mod iron;
+pub mod mullion;
 pub mod refshapes;
 pub mod rules;
 pub mod score;
@@ -22,7 +23,7 @@ pub mod validate;
 pub use derive::CancelToken;
 pub use design::{Design, Opening, OrnKind, Ornament, Stats, TreeNode};
 pub use genome::{GENERATOR_VERSION, Genome, NodePath, Params};
-pub use style::{Family, StyleParams, WindowKind};
+pub use style::{CrossKind, Family, StyleParams, WindowKind};
 
 use geom::clip::offset_region;
 use geom::math::*;
@@ -69,6 +70,9 @@ pub fn generate(shape: &Region, genome: &Genome, cancel: &CancelToken) -> Result
     }
     if genome.style.door {
         return door::generate_door(shape, genome, cancel);
+    }
+    if genome.style.window == WindowKind::Meneaux {
+        return mullion::generate_mullion(shape, genome, cancel);
     }
     let shape = Region::new(shape.outer.clone(), shape.holes.clone());
     let l = shape.bbox().diag();

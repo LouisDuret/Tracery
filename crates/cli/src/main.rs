@@ -5,7 +5,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use engine::refshapes::{REF_IDS, ref_shape};
 use engine::seed::{parse_seed, to_base32};
-use engine::style::{Family, StyleParams, SymMode};
+use engine::style::{CrossKind, Family, StyleParams, SymMode, WindowKind};
 use engine::validate::validate;
 use engine::{CancelToken, Design, Genome, generate};
 use io::project::{Project, ProjectShape, RegionJson};
@@ -89,6 +89,16 @@ struct StyleArgs {
     /// proportions), ornée de pentures à volutes, fleurons, clous et anneau.
     #[arg(long, aliases = ["ironwork", "ferronneries"])]
     ferronnerie: bool,
+    /// Fenêtre à meneaux et croisées (ADR-30) : chambranle mouluré, croix
+    /// de pierre, vitrerie, appui et larmier.
+    #[arg(long, alias = "mullion")]
+    meneaux: bool,
+    /// Croisée d'une fenêtre à meneaux : auto, simple ou double.
+    #[arg(long)]
+    croisee: Option<String>,
+    /// Fenêtre à meneaux : angles hauts arrondis (oui / non ; sinon seed).
+    #[arg(long)]
+    arrondi: Option<String>,
 }
 
 impl StyleArgs {
@@ -136,6 +146,25 @@ impl StyleArgs {
         }
         if self.ferronnerie {
             p.iron = true;
+        }
+        if self.meneaux {
+            p.window = WindowKind::Meneaux;
+        }
+        if let Some(c) = &self.croisee {
+            p.cross = match c.as_str() {
+                "auto" => CrossKind::Auto,
+                "simple" => CrossKind::Simple,
+                "double" => CrossKind::Double,
+                _ => bail!("croisée inconnue : {c} (auto, simple, double)"),
+            };
+        }
+        if let Some(a) = &self.arrondi {
+            p.round_top = match a.as_str() {
+                "oui" | "yes" => Some(true),
+                "non" | "no" => Some(false),
+                "auto" => None,
+                _ => bail!("arrondi : oui, non ou auto"),
+            };
         }
         Ok(p)
     }

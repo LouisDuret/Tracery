@@ -109,6 +109,17 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   porte en bois). Il remplace les cases « Porte » et « Ferronnerie ». Les
   générateurs des fenêtres à meneaux et des vitraux restent à écrire : ces
   types sont remplis d'un remplage en attendant.
+- v0.7.0 : générateur de fenêtres à meneaux et croisées (ADR-30) :
+  - chambranle mouluré (listel et gorge sur l'arête, baguette et gorge
+    autour de chaque jour), croisée simple (quatre jours) ou double (six),
+    traverse au-dessus du milieu ;
+  - angles hauts droits ou arrondis en quart de cercle ;
+  - bases au pied des meneaux, vitrerie en losanges ou à petits carreaux,
+    appui saillant, larmier à retours et culots ;
+  - réglages « Croisée » et « Angles hauts » dans la section Ouvrage ;
+    options `--meneaux`, `--croisee`, `--arrondi` de la ligne de commande ;
+  - le rendu pierre et les épures montrent les plombs devant le vide des
+    jours (planche `v07_croisees.png`).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 
@@ -124,6 +135,7 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
 | `v05_portes.png` | Portes : quatre seeds en mode pierre et une épure |
 | `v06_ferronneries.png` | Ferronneries : vantaux simples et doubles, arcs et rectangles, une épure |
 | `v062_ferronneries.png` | Ferronneries v0.6.2 : fer fin, rameaux récursifs (quatre portes, seeds 1, 3, 5) |
+| `v07_croisees.png` | Fenêtres à meneaux : baie 1000 × 1700 (seeds 0 à 7) et baie carrée 1500 × 1500 (seeds 0 à 3) |
 
 ## Écarts et points à arbitrer
 

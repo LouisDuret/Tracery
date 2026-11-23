@@ -201,6 +201,22 @@ fn fill_doors(
         if let Some(p) = region_path(&op, v) {
             pm.fill_path(&p, &paint(void, 255), FillRule::Winding, id, None);
         }
+        // reliefs de niveau 3 posés dans une baie (plombs des vitreries,
+        // ADR-30) : devant le vide
+        let obb: Vec<geom::BBox> = op.iter().map(|r| r.bbox()).collect();
+        for o in &d.ornaments {
+            let b = o.region.bbox();
+            let inside = obb.iter().any(|q| {
+                b.min.x >= q.min.x && b.min.y >= q.min.y && b.max.x <= q.max.x && b.max.y <= q.max.y
+            });
+            if o.kind == OrnKind::Relief
+                && o.level >= 3
+                && inside
+                && let Some(p) = region_path(&[&o.region], v)
+            {
+                pm.fill_path(&p, &paint(stone, 255), FillRule::Winding, id, None);
+            }
+        }
     }
 }
 
@@ -605,6 +621,9 @@ fn render_stone_layered(pm: &mut Pixmap, ds: &[&Design], v: &View, transparent: 
     let mut hmap = vec![f64::NEG_INFINITY; n];
     let mut stone_a = vec![0f32; n];
     let mut wall_a = vec![0f32; n];
+    // couverture des reliefs de niveau 3 : ils passent devant les baies
+    // (plombs des vitreries, ADR-30)
+    let mut top_cov: Vec<f32> = Vec::new();
     // reliefs des portes, niveau par niveau
     for lv in 0u8..=3 {
         let regs: Vec<&Region> = ds
@@ -620,6 +639,9 @@ fn render_stone_layered(pm: &mut Pixmap, ds: &[&Design], v: &View, transparent: 
         let cov = coverage(&regs, v, FillRule::Winding);
         let dist = edt(w, h, |i| cov[i] > 0.5);
         let (b, bv) = (base[lv as usize] * u, bevel[lv as usize] * u);
+        if lv == 3 {
+            top_cov = cov.clone();
+        }
         hmap.par_iter_mut()
             .zip(stone_a.par_iter_mut())
             .zip(wall_a.par_iter_mut())
@@ -698,10 +720,15 @@ fn render_stone_layered(pm: &mut Pixmap, ds: &[&Design], v: &View, transparent: 
         .filter(|d| !d.door)
         .flat_map(|d| d.openings.iter().map(|o| &o.region))
         .collect();
-    let (void_a, glass_a) = rayon::join(
+    let (mut void_a, glass_a) = rayon::join(
         || coverage(&doors, v, FillRule::Winding),
         || coverage(&glass_regs, v, FillRule::EvenOdd),
     );
+    if !top_cov.is_empty() {
+        for (va, tc) in void_a.iter_mut().zip(&top_cov) {
+            *va *= 1.0 - tc;
+        }
+    }
     let floor = -0.6 * u;
     for i in 0..n {
         if void_a[i] > 0.5 {

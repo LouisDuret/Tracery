@@ -318,7 +318,7 @@ impl Ouvrage {
                 "Remplage gothique : réseau de pierre construit à la règle et au compas."
             }
             Ouvrage::Meneaux => {
-                "Générateur à venir : la forme est pour l'instant remplie d'un remplage."
+                "Croisée de pierre : chambranle mouluré, meneau et traverse (croix simple ou double), vitrerie en losanges ou à carreaux, appui et larmier."
             }
             Ouvrage::Vitrail => {
                 "Générateur à venir : la forme est pour l'instant remplie d'un remplage."
@@ -333,7 +333,7 @@ impl Ouvrage {
     }
     /// Le générateur a-t-il son propre algorithme ?
     pub fn has_generator(self) -> bool {
-        !matches!(self, Ouvrage::Meneaux | Ouvrage::Vitrail)
+        self != Ouvrage::Vitrail
     }
     /// Formes qui conviennent : l'encadrement de porte demande un arc, la
     /// porte en bois un arc ou un rectangle ; les fenêtres, toute forme.

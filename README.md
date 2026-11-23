@@ -27,6 +27,9 @@ tracery-cli generate --shape tests/shapes/porte_tiers_point.json --style flamboy
 # Ferronnerie : porte de bois à un ou deux vantaux (selon les proportions)
 tracery-cli generate --shape tests/shapes/porte_double_rect.json --style flamboyant --ferronnerie --seed 1 --out vantaux.png --png 2048
 
+# Fenêtre à meneaux : croisée double, angles hauts arrondis, vitrerie
+tracery-cli generate --shape tests/shapes/porte_simple_rect.json --meneaux --croisee double --arrondi oui --seed 4 --out croisee.png --png 2048
+
 # Planche de contact de 64 variantes, triées par score
 tracery-cli gallery --shape S10 --style flamboyant --seeds 0..63 --sort-score --out planche.png
 
