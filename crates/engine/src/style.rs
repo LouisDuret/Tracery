@@ -76,6 +76,21 @@ pub enum TerminalMode {
     Auto,
 }
 
+/// Type de fenêtre choisi dans l'application (ADR-29). Seul le remplage a
+/// son générateur : les autres types sont, pour l'instant, générés comme un
+/// remplage. Sans effet quand la forme est une porte (`door`, `iron`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowKind {
+    /// Remplage (tracerie).
+    #[default]
+    Remplage,
+    /// Fenêtre à meneaux et croisées.
+    Meneaux,
+    /// Vitrail.
+    Vitrail,
+}
+
 /// Paramètres de style exposés à l'utilisateur (§ 3.6), partie du génome.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -115,6 +130,8 @@ pub struct StyleParams {
     /// Ferronnerie (ADR-26) : la forme (rectangle, arc) devient une porte
     /// de bois à un ou deux vantaux, ornée de pentures à volutes.
     pub iron: bool,
+    /// Type de fenêtre (ADR-29), retenu même quand la forme devient porte.
+    pub window: WindowKind,
 }
 
 impl Default for StyleParams {
@@ -138,6 +155,7 @@ impl Default for StyleParams {
             frame: true,
             door: false,
             iron: false,
+            window: WindowKind::Remplage,
         }
     }
 }

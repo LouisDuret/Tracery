@@ -664,3 +664,37 @@ documentation, qui sont en français.
 - Inchangés : le dossier de travail local, le cahier des charges
   (`Cahier_des_charges_Remplage.docx`) et les noms des crates.
 
+## ADR-29 — Choix de l'ouvrage : catégorie et type (v0.6.5)
+
+**Contexte.** Le commanditaire veut choisir, pour chaque forme, ce qu'elle
+devient : une fenêtre (remplage ou tracerie, fenêtre à meneaux et croisées,
+vitrail) ou une porte (encadrement de porte, porte en bois). Il ne demande
+pour l'instant que l'interface : les générateurs manquants viendront
+ensuite.
+
+**Décision.**
+- **Interface** : une section « Ouvrage », en tête du panneau de droite,
+  avec deux menus déroulants. « Catégorie » propose Fenêtre ou Porte ;
+  « Type » propose les types de la catégorie. Elle remplace les cases
+  « Porte » et « Ferronnerie ».
+- **Stockage** : dans le style du génome, donc enregistré avec le projet
+  et copié avec le génome. L'encadrement de porte reste `door` (ADR-23) et
+  la porte en bois `iron` (ADR-26) : le moteur et la ligne de commande
+  (`--porte`, `--ferronnerie`) ne changent pas. Un nouveau champ
+  `StyleParams::window` (`remplage`, `meneaux`, `vitrail`, par défaut
+  `remplage`) donne le type de fenêtre. Il est retenu quand la forme
+  devient porte, pour le retrouver en revenant à « Fenêtre ». Les génomes
+  et projets antérieurs, sans ce champ, restent des remplages.
+- **Formes admises**, comme avant : l'encadrement demande un arc, la porte
+  en bois un arc ou un rectangle. Les autres types sont grisés dans le menu
+  (avec une bulle d'explication), et « Porte » l'est si aucun ne convient.
+  Les fenêtres acceptent toute forme. Passer en porte recadre la vue sur le
+  décor dès la génération reçue.
+- **Générateurs à venir** : `meneaux` et `vitrail` n'ont pas encore leur
+  générateur. Le moteur ignore le champ `window` et produit un remplage ;
+  le panneau l'indique. Le déterminisme est inchangé : les seeds dorées
+  passent sans mise à jour.
+- Le modèle (`Category`, `Ouvrage` dans `crates/app/src/doc.rs`) est
+  testé : aller-retour de chaque type, type de fenêtre retenu, formes
+  admises, génome sans champ `window`.
+

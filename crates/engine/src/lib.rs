@@ -22,7 +22,7 @@ pub mod validate;
 pub use derive::CancelToken;
 pub use design::{Design, Opening, OrnKind, Ornament, Stats, TreeNode};
 pub use genome::{GENERATOR_VERSION, Genome, NodePath, Params};
-pub use style::{Family, StyleParams};
+pub use style::{Family, StyleParams, WindowKind};
 
 use geom::clip::offset_region;
 use geom::math::*;

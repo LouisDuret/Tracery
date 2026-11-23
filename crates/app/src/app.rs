@@ -3,8 +3,8 @@
 //! favoris, barre d'état.
 
 use crate::doc::{
-    BoolOp, Document, Handle, PrimKind, PrimSpec, ShapeItem, boolean, group_bbox,
-    objects_from_text, objects_to_text,
+    BoolOp, Category, Document, Handle, Ouvrage, PrimKind, PrimSpec, ShapeItem, boolean,
+    group_bbox, objects_from_text, objects_to_text,
 };
 use crate::selection::Selection;
 use crate::settings::{Interface, Settings, mode_key, settings_path};
@@ -2065,6 +2065,71 @@ impl TraceryApp {
         });
     }
 
+    /// Choix de l'ouvrage (ADR-29) : catégorie (fenêtre, porte), puis type.
+    fn ouvrage_ui(&mut self, ui: &mut egui::Ui, id: u64) {
+        let Some(s) = self.doc.get_mut(id) else {
+            return;
+        };
+        let prim = s.prim;
+        let cur = Ouvrage::of(&s.genome.style);
+        let mut want = cur;
+        egui::Grid::new("ouvrage").num_columns(2).show(ui, |ui| {
+            ui.label("Catégorie");
+            egui::ComboBox::from_id_salt("categorie")
+                .selected_text(cur.category().label())
+                .show_ui(ui, |ui| {
+                    for c in Category::ALL {
+                        let fit = Ouvrage::first_fitting(c, &s.genome.style, prim.as_ref());
+                        let r = ui.add_enabled(
+                            fit.is_some(),
+                            egui::Button::selectable(cur.category() == c, c.label()),
+                        );
+                        let r = r.on_disabled_hover_text(
+                            "Les portes demandent un arc (encadrement, porte en bois) ou un rectangle (porte en bois).",
+                        );
+                        if r.clicked()
+                            && c != cur.category()
+                            && let Some(o) = fit
+                        {
+                            want = o;
+                        }
+                    }
+                });
+            ui.end_row();
+            ui.label("Type");
+            egui::ComboBox::from_id_salt("type_ouvrage")
+                .selected_text(cur.label())
+                .width(200.0)
+                .show_ui(ui, |ui| {
+                    for &o in cur.category().types() {
+                        let r = ui
+                            .add_enabled(
+                                o.fits(prim.as_ref()) || o == cur,
+                                egui::Button::selectable(o == cur, o.label()),
+                            )
+                            .on_hover_text(o.hint())
+                            .on_disabled_hover_text(
+                                "Ne convient pas à cette forme : l'encadrement demande un arc, la porte en bois un arc ou un rectangle.",
+                            );
+                        if r.clicked() {
+                            want = o;
+                        }
+                    }
+                });
+            ui.end_row();
+        });
+        if !cur.has_generator() {
+            ui.small("Générateur à venir : la forme est remplie d'un remplage en attendant.");
+        }
+        if want != cur {
+            want.apply(&mut s.genome.style);
+            if want.category() == Category::Porte {
+                // recadrer sur le décor de la porte dès la génération reçue
+                self.fit_on_door = Some(id);
+            }
+        }
+    }
+
     fn right_panel(&mut self, ui: &mut egui::Ui) {
         if self.doc.shapes.is_empty() {
             ui.heading("Aucune forme");
@@ -2077,6 +2142,10 @@ impl TraceryApp {
             return;
         };
         let design = self.design_of(id);
+        // -------------------------------------------------------- ouvrage
+        egui::CollapsingHeader::new("Ouvrage")
+            .default_open(true)
+            .show(ui, |ui| self.ouvrage_ui(ui, id));
         // ---------------------------------------------------------- forme
         egui::CollapsingHeader::new("Forme").default_open(true).show(ui, |ui| {
             let Some(s) = self.doc.get_mut(id) else { return };
@@ -2108,23 +2177,6 @@ impl TraceryApp {
                         ui.end_row();
                     }
                 });
-                if matches!(p.kind, PrimKind::Arch(_)) || s.genome.style.door {
-                    let r = ui.checkbox(&mut s.genome.style.door, "Porte");
-                    if r.changed() && s.genome.style.door {
-                        s.genome.style.iron = false;
-                        self.fit_on_door = Some(id);
-                    }
-                    r
-                        .on_hover_text("L'arc devient une baie de porte, décorée à l'extérieur : archivolte, accolade à crochets, fleuron, pinacles, lancettes aveugles, tympan.");
-                }
-                if matches!(p.kind, PrimKind::Arch(_) | PrimKind::Rect) || s.genome.style.iron {
-                    let r = ui.checkbox(&mut s.genome.style.iron, "Ferronnerie");
-                    if r.changed() && s.genome.style.iron {
-                        s.genome.style.door = false;
-                        self.fit_on_door = Some(id);
-                    }
-                    r.on_hover_text("La forme devient une porte de bois à un ou deux vantaux (selon ses proportions), ornée de ferrures gothiques : pentures à volutes, fourches et fleurs de lis, rinceaux, fleurons, clous, anneau et serrure.");
-                }
                 if ui.button("Convertir en contour libre").clicked() {
                     s.make_free();
                 }
@@ -2135,12 +2187,6 @@ impl TraceryApp {
                     r.holes.len()
                 ));
                 ui.small("Glisser un sommet ou un milieu (courbure) ; double-clic : insérer un sommet ; Suppr : supprimer le sommet sélectionné.");
-                if s.genome.style.door {
-                    ui.checkbox(&mut s.genome.style.door, "Porte");
-                }
-                if s.genome.style.iron {
-                    ui.checkbox(&mut s.genome.style.iron, "Ferronnerie");
-                }
                 if let Some((sid, Handle::Mid(li, i))) = self.sel_handle
                     && sid == id && ui.button("Segment ↔ arc").clicked() {
                         s.toggle_arc(li, i);
@@ -2243,6 +2289,7 @@ impl TraceryApp {
                         frame: keep.frame,
                         door: keep.door,
                         iron: keep.iron,
+                        window: keep.window,
                         candidates: keep.candidates,
                         temperature: keep.temperature,
                         ..StyleParams::for_family(st.family)

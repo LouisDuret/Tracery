@@ -1,7 +1,7 @@
 //! Document : formes (primitives paramétriques ou contours libres), chacune
 //! avec son génome (EF-26), favoris ; conversion vers le fichier projet.
 
-use engine::{Genome, StyleParams};
+use engine::{Genome, StyleParams, WindowKind};
 use geom::clip;
 use geom::math::*;
 use geom::{Loop, Region, Seg, Xf};
@@ -231,6 +231,134 @@ impl Document {
         }
         d.favorites = p.favorites.clone();
         d
+    }
+}
+
+// ------------------------------------------------------------ ouvrage
+
+/// Catégorie d'ouvrage d'une forme (ADR-29).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    Fenetre,
+    Porte,
+}
+
+impl Category {
+    pub const ALL: [Category; 2] = [Category::Fenetre, Category::Porte];
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Fenetre => "Fenêtre",
+            Category::Porte => "Porte",
+        }
+    }
+    pub fn types(self) -> &'static [Ouvrage] {
+        match self {
+            Category::Fenetre => &[Ouvrage::Remplage, Ouvrage::Meneaux, Ouvrage::Vitrail],
+            Category::Porte => &[Ouvrage::Encadrement, Ouvrage::PorteBois],
+        }
+    }
+}
+
+/// Type d'ouvrage. Il est stocké dans le style du génome : `door` pour
+/// l'encadrement de porte (ADR-23), `iron` pour la porte en bois (ADR-26),
+/// `window` pour les fenêtres.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ouvrage {
+    Remplage,
+    Meneaux,
+    Vitrail,
+    Encadrement,
+    PorteBois,
+}
+
+impl Ouvrage {
+    pub fn of(st: &StyleParams) -> Ouvrage {
+        if st.iron {
+            Ouvrage::PorteBois
+        } else if st.door {
+            Ouvrage::Encadrement
+        } else {
+            match st.window {
+                WindowKind::Remplage => Ouvrage::Remplage,
+                WindowKind::Meneaux => Ouvrage::Meneaux,
+                WindowKind::Vitrail => Ouvrage::Vitrail,
+            }
+        }
+    }
+    /// Règle le style pour ce type (le type de fenêtre est retenu quand la
+    /// forme devient porte, pour le retrouver en revenant à « Fenêtre »).
+    pub fn apply(self, st: &mut StyleParams) {
+        st.door = self == Ouvrage::Encadrement;
+        st.iron = self == Ouvrage::PorteBois;
+        match self {
+            Ouvrage::Remplage => st.window = WindowKind::Remplage,
+            Ouvrage::Meneaux => st.window = WindowKind::Meneaux,
+            Ouvrage::Vitrail => st.window = WindowKind::Vitrail,
+            Ouvrage::Encadrement | Ouvrage::PorteBois => {}
+        }
+    }
+    pub fn category(self) -> Category {
+        match self {
+            Ouvrage::Remplage | Ouvrage::Meneaux | Ouvrage::Vitrail => Category::Fenetre,
+            Ouvrage::Encadrement | Ouvrage::PorteBois => Category::Porte,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Ouvrage::Remplage => "Remplage (tracerie)",
+            Ouvrage::Meneaux => "Fenêtre à meneaux et croisées",
+            Ouvrage::Vitrail => "Vitrail",
+            Ouvrage::Encadrement => "Encadrement de porte",
+            Ouvrage::PorteBois => "Porte en bois",
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Ouvrage::Remplage => {
+                "Remplage gothique : réseau de pierre construit à la règle et au compas."
+            }
+            Ouvrage::Meneaux => {
+                "Générateur à venir : la forme est pour l'instant remplie d'un remplage."
+            }
+            Ouvrage::Vitrail => {
+                "Générateur à venir : la forme est pour l'instant remplie d'un remplage."
+            }
+            Ouvrage::Encadrement => {
+                "L'arc devient une baie de porte, décorée à l'extérieur : archivolte, accolade à crochets, fleuron, pinacles, lancettes aveugles, tympan."
+            }
+            Ouvrage::PorteBois => {
+                "Porte de bois à un ou deux vantaux (selon les proportions), ornée de ferrures gothiques : pentures à volutes, fourches et fleurs de lis, rinceaux, fleurons, clous, anneau et serrure."
+            }
+        }
+    }
+    /// Le générateur a-t-il son propre algorithme ?
+    pub fn has_generator(self) -> bool {
+        !matches!(self, Ouvrage::Meneaux | Ouvrage::Vitrail)
+    }
+    /// Formes qui conviennent : l'encadrement de porte demande un arc, la
+    /// porte en bois un arc ou un rectangle ; les fenêtres, toute forme.
+    pub fn fits(self, prim: Option<&PrimSpec>) -> bool {
+        let kind = prim.map(|p| p.kind);
+        match self {
+            Ouvrage::Encadrement => matches!(kind, Some(PrimKind::Arch(_))),
+            Ouvrage::PorteBois => matches!(kind, Some(PrimKind::Arch(_) | PrimKind::Rect)),
+            _ => true,
+        }
+    }
+    /// Premier type de la catégorie qui convient à la forme.
+    pub fn first_fitting(
+        c: Category,
+        st: &StyleParams,
+        prim: Option<&PrimSpec>,
+    ) -> Option<Ouvrage> {
+        if c == Category::Fenetre {
+            // retrouver le type de fenêtre retenu
+            let mut w = st.clone();
+            w.door = false;
+            w.iron = false;
+            return Some(Ouvrage::of(&w));
+        }
+        c.types().iter().copied().find(|o| o.fits(prim))
     }
 }
 
@@ -567,5 +695,59 @@ mod tests {
             d.get(1).unwrap().prim.is_some(),
             "la primitive reste paramétrique"
         );
+    }
+
+    #[test]
+    fn ouvrages() {
+        let arc = PrimSpec {
+            kind: PrimKind::Arch(ArchKind::equilateral()),
+            center: P2::ZERO,
+            w: 1000.0,
+            h: 2000.0,
+            angle: 0.0,
+        };
+        let cercle = PrimSpec {
+            kind: PrimKind::Circle,
+            ..arc
+        };
+        let mut st = StyleParams::default();
+        assert_eq!(Ouvrage::of(&st), Ouvrage::Remplage);
+        // chaque type se relit tel quel
+        for c in Category::ALL {
+            for &o in c.types() {
+                o.apply(&mut st);
+                assert_eq!(Ouvrage::of(&st), o);
+                assert_eq!(o.category(), c);
+                assert!(!(st.door && st.iron));
+            }
+        }
+        // le type de fenêtre est retenu pendant que la forme est une porte
+        Ouvrage::Vitrail.apply(&mut st);
+        Ouvrage::PorteBois.apply(&mut st);
+        assert_eq!(
+            Ouvrage::first_fitting(Category::Fenetre, &st, Some(&arc)),
+            Some(Ouvrage::Vitrail)
+        );
+        // formes qui conviennent aux portes
+        assert_eq!(
+            Ouvrage::first_fitting(Category::Porte, &st, Some(&arc)),
+            Some(Ouvrage::Encadrement)
+        );
+        let rect = PrimSpec {
+            kind: PrimKind::Rect,
+            ..arc
+        };
+        assert_eq!(
+            Ouvrage::first_fitting(Category::Porte, &st, Some(&rect)),
+            Some(Ouvrage::PorteBois)
+        );
+        assert_eq!(
+            Ouvrage::first_fitting(Category::Porte, &st, Some(&cercle)),
+            None
+        );
+        assert_eq!(Ouvrage::first_fitting(Category::Porte, &st, None), None);
+        // un ancien génome (sans champ `window`) reste un remplage
+        let g: StyleParams = serde_json::from_str("{\"door\": false}").unwrap();
+        assert_eq!(Ouvrage::of(&g), Ouvrage::Remplage);
     }
 }

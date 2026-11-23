@@ -103,6 +103,12 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   `.remplage` restent lisibles), dossier `%APPDATA%/Tracery` (réglages et
   session repris de `%APPDATA%/Remplage` au premier lancement), variables
   `TRACERY_*`. Publication sur GitHub (`LouisDuret/Tracery`).
+- v0.6.5 : choix de l'ouvrage dans le panneau de droite (ADR-29) : menu
+  « Catégorie » (fenêtre, porte), puis menu « Type » (fenêtre : remplage,
+  fenêtre à meneaux et croisées, vitrail ; porte : encadrement de porte,
+  porte en bois). Il remplace les cases « Porte » et « Ferronnerie ». Les
+  générateurs des fenêtres à meneaux et des vitraux restent à écrire : ces
+  types sont remplis d'un remplage en attendant.
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 
