@@ -126,6 +126,13 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   discrets (0,14 à 0,24 largeur de jour).
 - v0.7.2 : « Encadrement de porte » (porte à pinacles) se choisit sur toute
   forme, rectangle compris, et plus seulement sur un arc (ADR-29).
+- v0.7.3 : croisées arrondies : l'arête extérieure du chambranle est
+  arrondie elle aussi (arc concentrique à la baie) ; au lieu du larmier
+  droit, une accolade surmontée d'un épi, comme sur les encadrements de
+  porte (ADR-30).
+- v0.7.4 : croisées à accolade (ADR-30) : accolade en biarc (arcs de
+  cercle) comme sur les portes, crochets en chou frisé, fleuron, pinacles
+  latéraux ; favorisée sur les baies étroites, évitée sur les larges.
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 
@@ -141,7 +148,7 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
 | `v05_portes.png` | Portes : quatre seeds en mode pierre et une épure |
 | `v06_ferronneries.png` | Ferronneries : vantaux simples et doubles, arcs et rectangles, une épure |
 | `v062_ferronneries.png` | Ferronneries v0.6.2 : fer fin, rameaux récursifs (quatre portes, seeds 1, 3, 5) |
-| `v07_croisees.png` | Fenêtres à meneaux : baie 1000 × 1700 (seeds 0 à 7) et baie carrée 1500 × 1500 (seeds 0 à 3) |
+| `v07_croisees.png` | Fenêtres à meneaux : baie 1000 × 1700 (seeds 0 à 7), baie étroite 800 × 1500 (seeds 0 à 3) et baie carrée 1500 × 1500 (seeds 0 à 3) |
 
 ## Écarts et points à arbitrer
 

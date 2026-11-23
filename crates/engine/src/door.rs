@@ -147,7 +147,7 @@ fn offset_seg(s: &Seg, d: f64) -> Seg {
 }
 
 /// Coupe le segment à sa première rencontre avec l'axe x = `xm`.
-fn trim_to_axis(s: &Seg, xm: f64) -> Option<Seg> {
+pub(crate) fn trim_to_axis(s: &Seg, xm: f64) -> Option<Seg> {
     match *s {
         Seg::Line { a, b } => {
             let dx = b.x - a.x;
@@ -189,7 +189,7 @@ fn trim_to_axis(s: &Seg, xm: f64) -> Option<Seg> {
 
 /// Bord décalé de `d` d'un demi-tracé gauche (du seuil à l'axe), coupé sur
 /// l'axe.
-fn offset_half(half: &[Seg], d: f64, xm: f64) -> Option<Vec<Seg>> {
+pub(crate) fn offset_half(half: &[Seg], d: f64, xm: f64) -> Option<Vec<Seg>> {
     let mut v: Vec<Seg> = half.iter().map(|s| offset_seg(s, d)).collect();
     let last = v.pop()?;
     if let Seg::Arc { r, .. } = last
@@ -203,7 +203,7 @@ fn offset_half(half: &[Seg], d: f64, xm: f64) -> Option<Vec<Seg>> {
 
 /// Région comprise entre deux demi-tracés gauches (bord extérieur `outer`
 /// et intérieur `inner`) et leurs miroirs, fermée au seuil.
-fn band_between(outer: &[Seg], inner: &[Seg], m: &Xf) -> Option<Region> {
+pub(crate) fn band_between(outer: &[Seg], inner: &[Seg], m: &Xf) -> Option<Region> {
     let mut segs: Vec<Seg> = outer.to_vec();
     segs.extend(outer.iter().rev().map(|s| s.transform(m).reversed()));
     let (bo, bi) = (outer.first()?.start(), inner.first()?.start());
@@ -227,7 +227,7 @@ fn inside_of(half: &[Seg], m: &Xf) -> Option<Region> {
 }
 
 /// Point et tangente à l'abscisse curviligne `u` d'une suite de segments.
-fn point_on(segs: &[Seg], u: f64) -> (P2, P2) {
+pub(crate) fn point_on(segs: &[Seg], u: f64) -> (P2, P2) {
     let mut u = u.max(0.0);
     for (i, s) in segs.iter().enumerate() {
         let l = s.length();
@@ -244,7 +244,7 @@ fn point_on(segs: &[Seg], u: f64) -> (P2, P2) {
     (P2::ZERO, P2::new(0.0, 1.0))
 }
 
-fn length_of(segs: &[Seg]) -> f64 {
+pub(crate) fn length_of(segs: &[Seg]) -> f64 {
     segs.iter().map(|s| s.length()).sum()
 }
 
@@ -276,7 +276,7 @@ pub(crate) fn chou(base: P2, n: P2, t: P2, l: f64) -> Vec<Region> {
 }
 
 /// Bourgeon terminal (larme pointant vers le haut).
-fn bud(base: P2, r: f64, h: f64) -> Vec<Region> {
+pub(crate) fn bud(base: P2, r: f64, h: f64) -> Vec<Region> {
     let c = base + P2::new(0.0, r);
     teardrop(c, r, base + P2::new(0.0, h.max(2.2 * r)))
         .map(|l| vec![Region::simple(l.oriented(true))])
@@ -367,7 +367,7 @@ impl Out {
 /// clé, là où la moulure est presque horizontale, pour que la pointe monte. Sans arc de tête
 /// lisible : biarc depuis la naissance jusqu'à T (hauteur `y_t`, tangente
 /// d'arrivée `tip_angle`). Renvoie le tracé et l'ordonnée de T.
-fn accolade_half(
+pub(crate) fn accolade_half(
     bay: &Bay,
     e: f64,
     f: f64,
@@ -422,9 +422,121 @@ fn accolade_half(
     }
 }
 
+/// Crochets en chou frisé le long du bord extérieur `outer` d'une
+/// accolade (demi-tracé gauche, du bas vers la pointe) : de la pointe
+/// jusqu'à l'abscisse curviligne `u_stop`, espacés de `dc`, de longueur
+/// `lc` ; chacun est doublé par le miroir `m`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn crockets(
+    out: &mut Out,
+    path: &str,
+    outer: &[Seg],
+    m: &Xf,
+    b: f64,
+    u_stop: f64,
+    dc: f64,
+    lc: f64,
+) {
+    let lo_len = length_of(outer);
+    let mut k = 0;
+    loop {
+        let u = lo_len - (k as f64 + 0.7) * dc;
+        if u < u_stop || k > 40 {
+            break;
+        }
+        let (p, t) = point_on(outer, u);
+        let n_out = perp(t);
+        let base = p - n_out * (0.3 * b);
+        let leaf = chou(base, n_out + t * 0.35, t, lc);
+        let mirrored: Vec<Region> = leaf.iter().map(|q| q.transform(m)).collect();
+        out.relief(path, 3, leaf);
+        out.relief(path, 3, mirrored);
+        k += 1;
+    }
+}
+
+/// Fleuron d'accolade posé sur la pointe (axe `xm`, pointe de l'axe de la
+/// moulure `y_t`, pointe du bord extérieur `tip_y`, largeur de moulure
+/// `b`, hauteur `fh`) : tige, socle, puis bouquet de choux frisés ou croix
+/// fleuronnée, et bourgeon. Renvoie le sommet et la longueur des feuilles.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fleuron(
+    out: &mut Out,
+    rng: &mut ChaCha8Rng,
+    p_fin: &str,
+    xm: f64,
+    y_t: f64,
+    tip_y: f64,
+    b: f64,
+    fh: f64,
+) -> (f64, f64) {
+    let sw = 0.7 * b;
+    let top = y_t + fh;
+    out.relief(
+        p_fin,
+        3,
+        [rect_r(
+            xm - sw / 2.0,
+            y_t - 0.5 * b,
+            xm + sw / 2.0,
+            top - 0.25 * fh,
+        )],
+    );
+    out.relief(
+        p_fin,
+        3,
+        [rect_r(
+            xm - 0.9 * b,
+            tip_y - 0.1 * b,
+            xm + 0.9 * b,
+            tip_y + 0.45 * b,
+        )],
+    );
+    let lf = b * unif_in(rng, 1.6, 2.2);
+    if unif(rng) < 0.5 {
+        // bouquet : deux étages de feuilles et un bourgeon
+        for (yf, kf) in [(0.30, 1.0), (0.58, 0.75)] {
+            for sx in [-1.0, 1.0] {
+                let base = P2::new(xm + sx * 0.3 * sw, y_t + yf * fh);
+                out.relief(
+                    p_fin,
+                    3,
+                    chou(base, P2::new(sx, 0.7), P2::new(0.0, 1.0), kf * lf),
+                );
+            }
+        }
+    } else {
+        // croix fleuronnée
+        let yy = y_t + 0.62 * fh;
+        let arm = 0.3 * fh;
+        out.relief(
+            p_fin,
+            3,
+            [rect_r(xm - arm, yy - sw / 2.0, xm + arm, yy + sw / 2.0)],
+        );
+        for sx in [-1.0, 1.0] {
+            let base = P2::new(xm + sx * arm, yy);
+            out.relief(
+                p_fin,
+                3,
+                chou(base, P2::new(sx, 0.3), P2::new(0.0, 1.0), 0.75 * lf),
+            );
+            let base = P2::new(xm + sx * 0.3 * sw, y_t + 0.26 * fh);
+            out.relief(
+                p_fin,
+                3,
+                chou(base, P2::new(sx, 0.6), P2::new(0.0, 1.0), 0.8 * lf),
+            );
+        }
+    }
+    let rb = 0.42 * lf;
+    out.relief(p_fin, 3, bud(P2::new(xm, top - 2.6 * rb), rb, 2.6 * rb));
+    (top, lf)
+}
+
 /// Épi de faîtage en croix de feuilles : tige, nœud, deux feuilles
 /// latérales et bourgeon terminal, posé sur la pointe `apex`, de hauteur `h`.
-fn cross_finial(apex: P2, h: f64) -> Vec<(OrnKind, u8, Region)> {
+pub(crate) fn cross_finial(apex: P2, h: f64) -> Vec<(OrnKind, u8, Region)> {
     let ws = 0.11 * h;
     let x = apex.x;
     let mut v = vec![
@@ -479,7 +591,7 @@ fn chevron(xc: f64, y_b: f64, hw: f64, apex_y: f64, d0: f64, d1: f64, y_cut: f64
 ///   médiane) ou couverte de tuiles en écailles, avec des crochets en
 ///   chou frisé régulièrement espacés sur ses arêtes ;
 /// - épi de faîtage en croix de feuilles.
-fn pinnacle(
+pub(crate) fn pinnacle(
     rng: &mut ChaCha8Rng,
     xc: f64,
     pw: f64,
@@ -1057,7 +1169,6 @@ pub fn generate_door(
     cancelled()?;
 
     // ------------------------------------------------------------ crochets
-    let lo_len = length_of(&outer);
     let a1_len = outer
         .len()
         .checked_sub(2)
@@ -1071,84 +1182,10 @@ pub fn generate_door(
     let u_stop = jamb_len + 0.6 * a1_len;
     let dc = s * unif_in(&mut rng, 0.13, 0.19);
     let lc = b * unif_in(&mut rng, 1.8, 2.4);
-    let mut k = 0;
-    loop {
-        let u = lo_len - (k as f64 + 0.7) * dc;
-        if u < u_stop || k > 40 {
-            break;
-        }
-        let (p, t) = point_on(&outer, u);
-        let n_out = perp(t);
-        let base = p - n_out * (0.3 * b);
-        let leaf = chou(base, n_out + t * 0.35, t, lc);
-        let mirrored: Vec<Region> = leaf.iter().map(|q| q.transform(&m)).collect();
-        out.relief(&p_croc, 3, leaf);
-        out.relief(&p_croc, 3, mirrored);
-        k += 1;
-    }
+    crockets(&mut out, &p_croc, &outer, &m, b, u_stop, dc, lc);
 
     // ------------------------------------------------------------ fleuron
-    let sw = 0.7 * b;
-    let top = y_t + fh;
-    out.relief(
-        &p_fin,
-        3,
-        [rect_r(
-            xm - sw / 2.0,
-            y_t - 0.5 * b,
-            xm + sw / 2.0,
-            top - 0.25 * fh,
-        )],
-    );
-    out.relief(
-        &p_fin,
-        3,
-        [rect_r(
-            xm - 0.9 * b,
-            tip_out.y - 0.1 * b,
-            xm + 0.9 * b,
-            tip_out.y + 0.45 * b,
-        )],
-    );
-    let lf = b * unif_in(&mut rng, 1.6, 2.2);
-    if unif(&mut rng) < 0.5 {
-        // bouquet : deux étages de feuilles et un bourgeon
-        for (yf, kf) in [(0.30, 1.0), (0.58, 0.75)] {
-            for sx in [-1.0, 1.0] {
-                let base = P2::new(xm + sx * 0.3 * sw, y_t + yf * fh);
-                out.relief(
-                    &p_fin,
-                    3,
-                    chou(base, P2::new(sx, 0.7), P2::new(0.0, 1.0), kf * lf),
-                );
-            }
-        }
-    } else {
-        // croix fleuronnée
-        let yy = y_t + 0.62 * fh;
-        let arm = 0.3 * fh;
-        out.relief(
-            &p_fin,
-            3,
-            [rect_r(xm - arm, yy - sw / 2.0, xm + arm, yy + sw / 2.0)],
-        );
-        for sx in [-1.0, 1.0] {
-            let base = P2::new(xm + sx * arm, yy);
-            out.relief(
-                &p_fin,
-                3,
-                chou(base, P2::new(sx, 0.3), P2::new(0.0, 1.0), 0.75 * lf),
-            );
-            let base = P2::new(xm + sx * 0.3 * sw, y_t + 0.26 * fh);
-            out.relief(
-                &p_fin,
-                3,
-                chou(base, P2::new(sx, 0.6), P2::new(0.0, 1.0), 0.8 * lf),
-            );
-        }
-    }
-    let rb = 0.42 * lf;
-    out.relief(&p_fin, 3, bud(P2::new(xm, top - 2.6 * rb), rb, 2.6 * rb));
+    let (top, lf) = fleuron(&mut out, &mut rng, &p_fin, xm, y_t, tip_out.y, b, fh);
     out.construction.push(ConstructionEntity::Line {
         a: P2::new(xm, y0),
         b: P2::new(xm, top),

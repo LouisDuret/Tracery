@@ -724,7 +724,38 @@ l'arête extérieure du chambranle.
 - **Angles hauts arrondis** (`round_top` : oui, non, ou selon la seed avec
   une chance sur 0,4) : quart de cercle de rayon 0,14 à 0,24 largeur de
   jour (au plus 0,35 fois la hauteur des jours hauts ; v0.7.1, au lieu de
-  0,3 à 0,5, jugé trop prononcé), centre dans le point de construction. Seulement pour une forme
+  0,3 à 0,5, jugé trop prononcé), centre dans le point de construction.
+  Depuis la v0.7.3, l'arête extérieure du chambranle est arrondie aussi,
+  par un arc concentrique (même centre, rayon augmenté de la largeur du
+  chambranle) : la forme du `Design` est alors ce contour arrondi, inscrit
+  dans le rectangle tracé.
+- **Couronnement (v0.7.4)** : accolade, larmier droit ou rien, sur une
+  forme rectangulaire. L'accolade est **favorisée sur les baies étroites
+  et évitée sur les larges** : probabilité 1,4 − 1,35 × largeur/hauteur,
+  bornée à [0 ; 0,85] (0,68 pour une baie de 800 × 1500, 0,05 pour une
+  baie carrée, aucune pour une baie plus large que haute). Le larmier droit prend la moitié du reste,
+  jamais sur une baie arrondie.
+- **Accolade (v0.7.4)**, construite comme celle des portes (ADR-23) et
+  avec leurs outils (`door::accolade_half`, `offset_half`, `band_between`,
+  `crockets`, `fleuron`, `pinnacle`) : l'axe de la moulure monte en retour
+  le long du piédroit, puis suit un **biarc** (deux arcs de cercle
+  tangents : arc convexe depuis la naissance, contre-courbe concave
+  jusqu'à la pointe sur l'axe, tangente d'arrivée à 54–76°), pointe à
+  0,22–0,42 largeur au-dessus de la baie. La v0.7.3 prolongeait l'arc de
+  l'angle par une contre-courbe de très grand rayon : l'accolade était
+  presque droite. Naissance au-dessus des angles droits, ou sous
+  l'arrondi des angles arrondis ; un tracé n'est retenu que si son axe
+  passe au large du chambranle. Moulure et gorge, **crochets en chou
+  frisé** sur l'extrados (trois fois sur quatre), **fleuron** (bouquet de
+  choux frisés ou croix fleuronnée) sur la pointe.
+- **Pinacles latéraux** (un peu plus d'une accolade sur deux) : ceux des
+  portes (fût, gâble ouvert sur une lancette, flèche à crochets, épi),
+  dressés sur l'appui de part et d'autre ; l'accolade naît contre eux et
+  ses retours descendent jusqu'à l'appui, élargi sous les pinacles. Sans
+  pinacles, les retours s'arrêtent sur des culots.
+- Factoriser crochets et fleuron hors de `generate_door` ne change pas les
+  portes : leurs ornements sont identiques avant et après (vérifié sur
+  quatre seeds). Seulement pour une forme
   rectangulaire ; les jours d'angle et leurs moulures suivent l'arrondi.
 - **Reliefs (v0.7.1)** : meneaux et traverses sont en **relief positif**,
   comme sur les relevés de Viollet-le-Duc, et les vitres au fond de la

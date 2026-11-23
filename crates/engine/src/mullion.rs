@@ -12,8 +12,9 @@
 //! - **Croix en saillie** sur le chambranle, avec un filet plus saillant
 //!   au milieu des meneaux et de la traverse ; les vitres et leurs plombs
 //!   sont au fond de la baie.
-//! - **Angles hauts** droits ou arrondis (quart de cercle) : la baie et ses
-//!   moulures suivent l'arrondi.
+//! - **Angles hauts** droits ou arrondis (quart de cercle) : la baie, ses
+//!   moulures et l'arête extérieure du chambranle (arc concentrique)
+//!   suivent l'arrondi.
 //! - **Bases** prismatiques au pied des meneaux, où meurent les moulures.
 //! - **Vitrerie** en losanges ou à petits carreaux (plombs), ou sans.
 //! - **Appui** saillant sous la baie, **larmier** à retours au-dessus,
@@ -25,7 +26,10 @@
 //! seed.
 
 use crate::design::{Design, Opening, Stats, TreeNode};
-use crate::door::{Out, rect, rect_r};
+use crate::door::{
+    Bay, Out, accolade_half, band_between, crockets, fleuron, length_of, offset_half, pinnacle,
+    point_on, rect, rect_r,
+};
 use crate::genome::{GENERATOR_VERSION, Genome, Params};
 use crate::rules::{unif, unif_in, weighted_index};
 use crate::score::ScoreBreakdown;
@@ -34,7 +38,7 @@ use crate::style::CrossKind;
 use crate::{CancelToken, GenError};
 use geom::clip::{intersect_loop, offset_region, subtract, union};
 use geom::math::*;
-use geom::{BBox, ConstructionEntity, ConstructionOp, Loop, Region, Seg};
+use geom::{BBox, ConstructionEntity, ConstructionOp, Loop, Region, Seg, Xf};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::BTreeMap;
@@ -233,6 +237,13 @@ pub fn generate_mullion(
     } else {
         bay0
     };
+    // arête extérieure du chambranle : arrondie elle aussi, concentrique à
+    // la baie (même centre, rayon augmenté de la largeur du chambranle)
+    let shape = if rounded {
+        Region::simple(round_top_rect(x0, y0, x1, y1, r_top + f))
+    } else {
+        shape
+    };
 
     // jours : la baie moins la croix
     let mut lights = vec![bay.clone()];
@@ -331,10 +342,41 @@ pub fn generate_mullion(
         }
     }
 
-    // ------------------------------------------------- appui et larmier
-    if rect_shape && unif(&mut rng) < 0.8 {
+    // ---------------------------------------------------- couronnement
+    // Accolade, larmier droit ou rien. L'accolade est favorisée sur les
+    // baies étroites et évitée sur les larges ; une baie arrondie n'a pas
+    // de larmier droit (ADR-30).
+    let ratio = w / h.max(1e-9);
+    let w_acc = if rect_shape {
+        (1.4 - 1.35 * ratio).clamp(0.0, 0.85)
+    } else {
+        0.0
+    };
+    let w_hood = if rect_shape && !rounded {
+        0.5 * (1.0 - w_acc)
+    } else {
+        0.0
+    };
+    let crown =
+        weighted_index(&mut rng, &[w_acc, w_hood, (1.0 - w_acc - w_hood).max(0.0)]).unwrap_or(2);
+    let b = f * unif_in(&mut rng, 0.45, 0.6); // largeur de la moulure
+    let gap = f * unif_in(&mut rng, 0.15, 0.3); // jour entre chambranle et moulure
+    let e = gap + 0.5 * b; // axe de la moulure, depuis l'arête
+    let drop = h * unif_in(&mut rng, 0.06, 0.1);
+    let pinnacles = crown == 0 && unif(&mut rng) < 0.55;
+    let pw = w * unif_in(&mut rng, 0.1, 0.14);
+    let x_pin = x0 - e - 0.5 * b - 0.4 * pw; // axe du pinacle gauche
+    let m_x = Xf::mirror_x(xm);
+
+    // ------------------------------------------------------------ appui
+    let mut y_floor = y0;
+    if rect_shape && (pinnacles || unif(&mut rng) < 0.8) {
         let p_sill = out.node("Appui");
-        let o = f * unif_in(&mut rng, 0.35, 0.6);
+        let o = if pinnacles {
+            x0 - (x_pin - 0.5 * pw) + 0.15 * f
+        } else {
+            f * unif_in(&mut rng, 0.35, 0.6)
+        };
         let hs = f * unif_in(&mut rng, 0.55, 0.8);
         out.relief(&p_sill, 2, [rect_r(x0 - o, y0 - hs, x1 + o, y0 + 0.3 * f)]);
         // goutte d'eau sous l'appui
@@ -348,13 +390,127 @@ pub fn generate_mullion(
                 y0 - 0.7 * hs,
             )],
         );
+        y_floor = y0 + 0.3 * f;
     }
-    if rect_shape && unif(&mut rng) < 0.55 {
+
+    // --------------------------------------------------------- accolade
+    if crown == 0 {
+        // naissance : sous l'arrondi des angles, ou au-dessus des angles
+        // droits ; les retours descendent jusqu'aux culots ou aux pinacles
+        let ys = if rounded { y1 - (r_top + f) } else { y1 + gap };
+        let y_low = if pinnacles { y_floor } else { ys - drop };
+        let bay = Bay {
+            x0,
+            x1,
+            xm,
+            y0: y_low,
+            ys,
+            ya: y1,
+            s: w,
+            head: None,
+        };
+        // l'axe de la moulure passe au large du chambranle
+        let clear = |segs: &[Seg]| {
+            let l = length_of(segs);
+            (0..=48).all(|k| {
+                let (p, _) = point_on(segs, l * k as f64 / 48.0);
+                -shape.sdf(p) >= 0.5 * b + 0.4 * gap
+            })
+        };
+        let mut acc = None;
+        for _ in 0..40 {
+            let y_t = y1 + e + w * unif_in(&mut rng, 0.22, 0.42);
+            let tip = unif_in(&mut rng, 0.30, 0.42) * PI;
+            if let Some((centre, y_t)) = accolade_half(&bay, e, 0.0, 1.0, y_t, tip)
+                && clear(&centre)
+                && let (Some(o), Some(i)) = (
+                    offset_half(&centre, 0.5 * b, xm),
+                    offset_half(&centre, -0.5 * b, xm),
+                )
+                && let Some(band) = band_between(&o, &i, &m_x)
+            {
+                acc = Some((centre, o, band, y_t));
+                break;
+            }
+        }
+        if let Some((centre, outer, band, y_t)) = acc {
+            let p_acc = out.node("Accolade");
+            out.relief(&p_acc, 2, [band]);
+            let g = 0.2 * b;
+            if let (Some(go), Some(gi)) = (
+                offset_half(&centre, 0.5 * g, xm),
+                offset_half(&centre, -0.5 * g, xm),
+            ) && let Some(groove) = band_between(&go, &gi, &m_x)
+            {
+                out.creux(&p_acc, 1, [groove]);
+            }
+            for sg in &centre {
+                if let Seg::Arc { c, r, .. } = *sg {
+                    for q in [c, m_x.apply(c)] {
+                        out.construction
+                            .push(ConstructionEntity::point(q, ConstructionOp::ArchCenter));
+                        out.construction.push(ConstructionEntity::Circle {
+                            c: q,
+                            r,
+                            op: ConstructionOp::ArchCenter,
+                        });
+                    }
+                }
+            }
+            // crochets en chou frisé sur l'extrados, de la pointe jusqu'au
+            // milieu de l'arc convexe
+            if unif(&mut rng) < 0.75 {
+                let p_croc = out.node("Crochets");
+                let jamb = if outer.len() >= 3 {
+                    outer[0].length()
+                } else {
+                    0.0
+                };
+                let a1 = outer
+                    .len()
+                    .checked_sub(2)
+                    .map_or(0.0, |i| outer[i].length());
+                let dc = w * unif_in(&mut rng, 0.1, 0.14);
+                let lc = b * unif_in(&mut rng, 1.6, 2.2);
+                crockets(&mut out, &p_croc, &outer, &m_x, b, jamb + 0.5 * a1, dc, lc);
+            }
+            // fleuron : bouquet de choux frisés ou croix fleuronnée
+            let p_fin = out.node("Fleuron");
+            let tip_y = outer.last().map_or(y_t, |s| s.end().y);
+            let fh = w * unif_in(&mut rng, 0.22, 0.34);
+            fleuron(&mut out, &mut rng, &p_fin, xm, y_t, tip_y, b, fh);
+            if pinnacles {
+                // pinacles de part et d'autre : fût, gâble, flèche à
+                // crochets et épi ; l'accolade naît contre eux
+                let p_pin = out.node("Pinacles");
+                let hb = pw * unif_in(&mut rng, 0.8, 1.2);
+                let y_pt = ys + (y_t - ys) * unif_in(&mut rng, 0.2, 0.45);
+                let left = pinnacle(&mut rng, x_pin, pw, y_floor, y_floor + hb, y_pt);
+                for (kind, lv, r) in left {
+                    let rr = r.transform(&m_x);
+                    out.add(&p_pin, kind, lv, [r, rr]);
+                }
+            } else {
+                // culots au bas des retours
+                let p_cul = out.node("Culots");
+                let c = P2::new(x0 - e, y_low);
+                out.relief(
+                    &p_cul,
+                    3,
+                    [
+                        Region::circle(c, 0.62 * b),
+                        Region::circle(m_x.apply(c), 0.62 * b),
+                    ],
+                );
+            }
+        }
+    }
+
+    // ---------------------------------------------------- larmier droit
+    if crown == 1 {
         let p_hood = out.node("Larmier");
         let o = f * unif_in(&mut rng, 0.45, 0.7);
-        let hl = f * unif_in(&mut rng, 0.45, 0.6);
-        let gap = f * unif_in(&mut rng, 0.15, 0.3);
-        let drop = h * unif_in(&mut rng, 0.07, 0.12);
+        let hl = b;
         let yb = y1 + gap;
         let (xa, xb) = (x0 - o, x1 + o);
         let mut hood = vec![rect_r(xa, yb, xb, yb + hl)];
@@ -548,6 +704,64 @@ mod tests {
         assert_eq!(arcs(&d.openings[0]), 1);
         assert_eq!(arcs(&d.openings[1]), 1);
         assert_eq!(arcs(&d.openings[2]), 0);
+        // l'arête extérieure est arrondie aussi, concentrique à la baie
+        let outer: Vec<Seg> = d.shape.segs().filter(|s| s.is_arc()).copied().collect();
+        let inner: Vec<Seg> = d.openings[0]
+            .region
+            .segs()
+            .filter(|s| s.is_arc())
+            .copied()
+            .collect();
+        assert_eq!(outer.len(), 2);
+        let (Seg::Arc { c: co, r: ro, .. }, Seg::Arc { c: ci, r: ri, .. }) = (outer[1], inner[0])
+        else {
+            panic!("arcs attendus");
+        };
+        assert!(dist(co, ci) < 1e-9 * 900.0, "centres confondus");
+        assert!(ro > ri);
+        // la forme reste dans le rectangle tracé
+        let bb = d.shape.bbox();
+        assert!(bb.min.x >= -450.0 - 1e-9 && bb.max.y <= 1600.0 + 1e-9);
+    }
+
+    #[test]
+    fn accolades() {
+        // accolade : fleuron sur l'axe, au-dessus de la baie ; fréquente sur
+        // une baie étroite, rare sur une baie large
+        let c = CancelToken::new();
+        let count = |r: &Region, h: f64, round: Option<bool>| {
+            let mut n = 0;
+            for seed in 0..40 {
+                let d = generate_mullion(r, &genome(seed, CrossKind::Auto, round), &c).unwrap();
+                if !d.tree.iter().any(|t| t.rule == "Accolade") {
+                    continue;
+                }
+                n += 1;
+                let p_fin = d
+                    .tree
+                    .iter()
+                    .find(|t| t.rule == "Fleuron")
+                    .unwrap()
+                    .path
+                    .clone();
+                let bb = d
+                    .ornaments
+                    .iter()
+                    .filter(|o| o.path == p_fin)
+                    .fold(BBox::EMPTY, |b, o| b.union(&o.region.bbox()));
+                assert!(bb.center().x.abs() < 1e-6 * h, "fleuron sur l'axe");
+                assert!(bb.min.y > h, "fleuron au-dessus de la baie");
+            }
+            n
+        };
+        let narrow = count(&window(800.0, 1500.0), 1500.0, None);
+        let rounded = count(&window(800.0, 1500.0), 1500.0, Some(true));
+        let wide = count(&window(1800.0, 1200.0), 1200.0, None);
+        assert!(
+            narrow >= 20 && rounded >= 20,
+            "étroite : {narrow}, arrondie : {rounded}"
+        );
+        assert!(wide <= 6, "large : {wide}");
     }
 
     #[test]
