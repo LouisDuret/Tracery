@@ -1,0 +1,8 @@
+[package]
+name = "motifs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+geom = { version = "0.1.0", path = "../geom" }
+serde = { version = "1.0.229", features = ["derive"] }

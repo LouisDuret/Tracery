@@ -1,0 +1,19 @@
+// Style « flamboyant » : poids des règles (0 = exclue), symétrie, brisure, score.
+// Modifiable sans recompiler les règles (rechargé à la compilation).
+(
+    name: "flamboyant",
+    symmetry: preferred,
+    rho: 1.0,
+    rho_range: (0.8, 1.2),
+    twin_prob: 0.9,
+    cusping: 0.8,
+    rules: {
+        "R01": 2.0, "R02": 1.0, "R03": 0.3, "R04": 1.5, "R05": 1.0, "R06": 1.0,
+        "R07": 2.0, "R08": 2.0, "R09": 3.0, "R10": 3.0, "R11": 3.0, "R12": 3.0,
+        "R14": 1.0, "R15": 0.3, "R16": 2.0, "R17": 2.0, "R19": 0.6, "R20": 1.0, "R21": 3.0, "R22": 4.0, "R23": 3.0, "R24": 4.0, "R25": 3.5,
+    },
+    score: {
+        "dens": 1.0, "meneau": 1.5, "vide": 1.0, "tan": 1.0, "sym": 0.2,
+        "hier": 0.7, "prop": 0.5, "equil": 0.6, "compl": 0.4, "coher": 0.4,
+    },
+)

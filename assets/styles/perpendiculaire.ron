@@ -1,0 +1,19 @@
+// Style « perpendiculaire » : poids des règles (0 = exclue), symétrie, brisure, score.
+// Modifiable sans recompiler les règles (rechargé à la compilation).
+(
+    name: "perpendiculaire",
+    symmetry: strict,
+    rho: 0.75,
+    rho_range: (0.6, 0.9),
+    twin_prob: 0.95,
+    cusping: 0.8,
+    rules: {
+        "R01": 2.0, "R02": 1.0, "R03": 1.0, "R04": 1.0, "R05": 0.0, "R06": 0.0,
+        "R07": 1.0, "R08": 1.0, "R09": 3.0, "R10": 0.0, "R11": 0.0, "R12": 0.0,
+        "R14": 3.0, "R15": 0.5, "R16": 1.0, "R17": 1.0, "R19": 0.6, "R20": 1.0, "R21": 3.0, "R22": 0.0, "R23": 0.5, "R24": 0.0, "R25": 0.0,
+    },
+    score: {
+        "dens": 1.0, "meneau": 1.5, "vide": 1.0, "tan": 1.0, "sym": 1.2,
+        "hier": 0.7, "prop": 0.5, "equil": 0.6, "compl": 0.4, "coher": 0.4,
+    },
+)

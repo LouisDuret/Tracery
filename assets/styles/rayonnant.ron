@@ -1,0 +1,19 @@
+// Style « rayonnant » : poids des règles (0 = exclue), symétrie, brisure, score.
+// Modifiable sans recompiler les règles (rechargé à la compilation).
+(
+    name: "rayonnant",
+    symmetry: strict,
+    rho: 1.0,
+    rho_range: (0.95, 1.05),
+    twin_prob: 0.9,
+    cusping: 0.6,
+    rules: {
+        "R01": 3.0, "R02": 3.0, "R03": 2.0, "R04": 3.0, "R05": 3.0, "R06": 3.0,
+        "R07": 3.0, "R08": 3.0, "R09": 2.0, "R10": 0.0, "R11": 0.0, "R12": 0.0,
+        "R14": 1.0, "R15": 0.5, "R16": 1.0, "R17": 1.0, "R19": 0.6, "R20": 2.0, "R21": 3.0, "R22": 0.0, "R23": 1.0, "R24": 0.0, "R25": 0.0,
+    },
+    score: {
+        "dens": 1.0, "meneau": 1.5, "vide": 1.0, "tan": 1.0, "sym": 1.2,
+        "hier": 0.7, "prop": 0.5, "equil": 0.6, "compl": 0.4, "coher": 0.4,
+    },
+)

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/geom", "crates/motifs", "crates/engine", "crates/io", "crates/cli", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
