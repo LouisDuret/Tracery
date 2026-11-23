@@ -335,12 +335,12 @@ impl Ouvrage {
     pub fn has_generator(self) -> bool {
         self != Ouvrage::Vitrail
     }
-    /// Formes qui conviennent : l'encadrement de porte demande un arc, la
-    /// porte en bois un arc ou un rectangle ; les fenêtres, toute forme.
+    /// Formes qui conviennent : la porte en bois demande un arc ou un
+    /// rectangle ; l'encadrement de porte (ADR-23, son générateur lit la
+    /// baie sur toute forme) et les fenêtres acceptent toute forme.
     pub fn fits(self, prim: Option<&PrimSpec>) -> bool {
         let kind = prim.map(|p| p.kind);
         match self {
-            Ouvrage::Encadrement => matches!(kind, Some(PrimKind::Arch(_))),
             Ouvrage::PorteBois => matches!(kind, Some(PrimKind::Arch(_) | PrimKind::Rect)),
             _ => true,
         }
@@ -728,24 +728,23 @@ mod tests {
             Ouvrage::first_fitting(Category::Fenetre, &st, Some(&arc)),
             Some(Ouvrage::Vitrail)
         );
-        // formes qui conviennent aux portes
-        assert_eq!(
-            Ouvrage::first_fitting(Category::Porte, &st, Some(&arc)),
-            Some(Ouvrage::Encadrement)
-        );
+        // l'encadrement de porte convient à toute forme (arc, rectangle,
+        // cercle, contour libre), la porte en bois à un arc ou un rectangle
         let rect = PrimSpec {
             kind: PrimKind::Rect,
             ..arc
         };
-        assert_eq!(
-            Ouvrage::first_fitting(Category::Porte, &st, Some(&rect)),
-            Some(Ouvrage::PorteBois)
-        );
-        assert_eq!(
-            Ouvrage::first_fitting(Category::Porte, &st, Some(&cercle)),
-            None
-        );
-        assert_eq!(Ouvrage::first_fitting(Category::Porte, &st, None), None);
+        for p in [Some(&arc), Some(&rect), Some(&cercle), None] {
+            assert!(Ouvrage::Encadrement.fits(p));
+            assert_eq!(
+                Ouvrage::first_fitting(Category::Porte, &st, p),
+                Some(Ouvrage::Encadrement)
+            );
+        }
+        assert!(Ouvrage::PorteBois.fits(Some(&arc)));
+        assert!(Ouvrage::PorteBois.fits(Some(&rect)));
+        assert!(!Ouvrage::PorteBois.fits(Some(&cercle)));
+        assert!(!Ouvrage::PorteBois.fits(None));
         // un ancien génome (sans champ `window`) reste un remplage
         let g: StyleParams = serde_json::from_str("{\"door\": false}").unwrap();
         assert_eq!(Ouvrage::of(&g), Ouvrage::Remplage);

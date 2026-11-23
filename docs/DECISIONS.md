@@ -685,10 +685,13 @@ ensuite.
   `remplage`) donne le type de fenêtre. Il est retenu quand la forme
   devient porte, pour le retrouver en revenant à « Fenêtre ». Les génomes
   et projets antérieurs, sans ce champ, restent des remplages.
-- **Formes admises**, comme avant : l'encadrement demande un arc, la porte
-  en bois un arc ou un rectangle. Les autres types sont grisés dans le menu
-  (avec une bulle d'explication), et « Porte » l'est si aucun ne convient.
-  Les fenêtres acceptent toute forme. Passer en porte recadre la vue sur le
+- **Formes admises** : la porte en bois demande un arc ou un rectangle.
+  L'encadrement de porte accepte toute forme depuis la v0.7.2 : son
+  générateur lit la baie sur n'importe quelle forme, et réserver le choix
+  aux arcs (comme l'ancienne case « Porte ») le rendait introuvable sur un
+  rectangle, où il donne pourtant une porte à pinacles réussie. Un type
+  qui ne convient pas est grisé dans le menu, avec une bulle
+  d'explication. Les fenêtres acceptent toute forme. Passer en porte recadre la vue sur le
   décor dès la génération reçue.
 - **Générateurs à venir** : `meneaux` et `vitrail` n'ont pas encore leur
   générateur. Le moteur ignore le champ `window` et produit un remplage ;

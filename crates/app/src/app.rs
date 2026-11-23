@@ -2099,7 +2099,7 @@ impl TraceryApp {
                             egui::Button::selectable(cur.category() == c, c.label()),
                         );
                         let r = r.on_disabled_hover_text(
-                            "Les portes demandent un arc (encadrement, porte en bois) ou un rectangle (porte en bois).",
+                            "Aucun type de cette catégorie ne convient à cette forme.",
                         );
                         if r.clicked()
                             && c != cur.category()
@@ -2123,7 +2123,7 @@ impl TraceryApp {
                             )
                             .on_hover_text(o.hint())
                             .on_disabled_hover_text(
-                                "Ne convient pas à cette forme : l'encadrement demande un arc, la porte en bois un arc ou un rectangle.",
+                                "Ne convient pas à cette forme : la porte en bois demande un arc ou un rectangle.",
                             );
                         if r.clicked() {
                             want = o;

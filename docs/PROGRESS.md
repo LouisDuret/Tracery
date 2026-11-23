@@ -124,6 +124,8 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   positif (croix et baguette en saillie, filet central), vitres et plombs
   au fond de la baie, plombs gris ; arrondis des angles hauts plus
   discrets (0,14 à 0,24 largeur de jour).
+- v0.7.2 : « Encadrement de porte » (porte à pinacles) se choisit sur toute
+  forme, rectangle compris, et plus seulement sur un arc (ADR-29).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 
