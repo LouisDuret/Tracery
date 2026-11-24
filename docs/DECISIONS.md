@@ -816,3 +816,32 @@ cercle) et six seeds. Planche `docs/planches/v07_croisees.png`.
 de la croisée (comme sur les lucarnes et les baies des photos de
 référence) ; vitraux (ADR-29).
 
+## ADR-31 — Tracés du canevas découpés à la vue (v0.7.7)
+
+**Contexte.** En zoomant sur un petit élément, l'application ralentissait.
+Les tracés du canevas étaient produits en entier, hors champ compris : un
+cercle de construction de 1 m vu à 30 px/mm mesure près de 200 000 px de
+tour, soit 20 000 tirets ; le cadre de sélection pointillé autour d'une
+porte, des millions. Le coût d'une image croissait avec le zoom (porte en
+épure sombre : 8 ms à ×600, 70 ms à ×3000 pour la seule construction des
+formes, sans compter le maillage par egui).
+
+**Décision.** Module `viewclip` de l'application : chaque tracé passe par
+un découpeur (`Clipper`) qui coupe chaque segment au rectangle de la vue
+élargi de 8 px (Liang-Barsky, en double précision pour garder des
+coordonnées justes loin de l'écran) et le rompt en morceaux visibles. Un
+arc n'est échantillonné que sur la plage d'angles où son cercle peut
+couper le disque qui contient la vue (loi des cosinus), au pas qui donne
+une flèche d'un quart de pixel. Passent par là : traits vus des portes,
+contours des formes, des baies et du nœud choisi, cercles et axes de
+construction (les tirets ne sont créés que sur les morceaux visibles),
+cadre de sélection. Un contour vu en entier reste une ligne fermée.
+
+**Conséquences.** Le coût d'une image ne dépend plus du zoom : 0,6 ms
+environ de ×1 à ×30 000 en épure sombre (porte et croisée), comme en
+rendu pierre. Les arcs gagnent en finesse à fort zoom (flèche ≤ ¼ px au
+lieu d'un plafond de 1 024 cordes par arc). Les traits vus des portes
+restent des polylignes calculées une fois à la tolérance du document :
+à très fort zoom, leurs arcs montrent des facettes. L'auto-test
+`TRACERY_SMOKE_ZOOM=k[,fx,fy]` grossit la vue k fois sur le point (fx, fy)
+de la boîte du contenu, pour mesurer avec `TRACERY_PERF`.

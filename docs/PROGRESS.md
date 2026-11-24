@@ -141,6 +141,12 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   commanditaire (ADR-30) : tablette à nez ovale (arcs de tête et de
   flanc) marquée de deux méridiens, rebord, congé creux, face, baguette et
   filet ; lisible en épure sombre (planche `v07_appuis.png`).
+- v0.7.7 : plus de ralentissement en zoomant sur un petit élément
+  (ADR-31) : les tracés du canevas (traits, contours, cercles et axes de
+  construction, cadre de sélection) sont découpés au cadre de la vue, les
+  arcs échantillonnés sur leur seule partie visible. Porte en épure sombre
+  zoomée ×3000 : 70 ms par image avant, 0,6 ms après, comme sans zoom ;
+  mesure par `TRACERY_SMOKE_ZOOM`.
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 

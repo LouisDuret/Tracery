@@ -6,6 +6,7 @@ mod app;
 mod doc;
 mod selection;
 mod settings;
+mod viewclip;
 mod worker;
 
 use std::path::PathBuf;

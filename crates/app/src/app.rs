@@ -8,6 +8,7 @@ use crate::doc::{
 };
 use crate::selection::Selection;
 use crate::settings::{Interface, Settings, mode_key, settings_path};
+use crate::viewclip::{Clipper, ScreenMap, loop_pieces};
 use crate::worker::{Msg, Worker};
 use egui::{Color32, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use engine::hidden::{DoorDrawing, door_drawing};
@@ -16,7 +17,7 @@ use engine::style::{Canon, CrossKind, Family, StyleParams, SymMode, TerminalMode
 use engine::{CancelToken, Design, Genome, NodePath, TreeNode};
 use geom::fit::{FitOptions, fit_stroke};
 use geom::math::*;
-use geom::{ConstructionEntity, Loop, Region, Seg, Xf};
+use geom::{ConstructionEntity, Loop, Region, Xf};
 use io::raster::{Mode, View};
 use motifs::ArchKind;
 use std::collections::{BTreeMap, BTreeSet};
@@ -661,6 +662,34 @@ impl TraceryApp {
         }
     }
 
+    /// Auto-test : TRACERY_SMOKE_ZOOM=k[,fx,fy] grossit la vue k fois sur
+    /// le point (fx, fy) de la boîte du contenu (fractions, défaut : centre),
+    /// pour mesurer les images d'un fort zoom (TRACERY_PERF).
+    fn smoke_zoom(&mut self) {
+        if self.smoke.is_none() {
+            return;
+        }
+        let Ok(v) = std::env::var("TRACERY_SMOKE_ZOOM") else {
+            return;
+        };
+        let n: Vec<f64> = v.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+        let Some(&k) = n.first() else { return };
+        let (fx, fy) = (
+            n.get(1).copied().unwrap_or(0.5),
+            n.get(2).copied().unwrap_or(0.5),
+        );
+        let mut bb = geom::BBox::EMPTY;
+        for s in &self.doc.shapes {
+            if let Some(d) = self.design_of(s.id) {
+                bb = bb.union(&d.bbox());
+            }
+        }
+        if !bb.is_empty() {
+            self.cam.center = P2::new(bb.min.x + fx * bb.size().x, bb.min.y + fy * bb.size().y);
+            self.cam.scale *= k;
+        }
+    }
+
     // ---------------------------------------------------------- génération
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -707,6 +736,7 @@ impl TraceryApp {
                             if !preview && door && self.fit_on_door == Some(shape) {
                                 self.fit_on_door = None;
                                 self.fit_view_pending();
+                                self.smoke_zoom();
                             }
                         }
                         Err(e) => {
@@ -1335,30 +1365,23 @@ impl TraceryApp {
 
 // ================================================================== dessin
 
-fn seg_points(s: &Seg, cam: &Cam, out: &mut Vec<Pos2>) {
-    match *s {
-        Seg::Line { a, .. } => out.push(cam.to_screen(a)),
-        Seg::Arc {
-            c,
-            r,
-            theta0,
-            sweep,
-        } => {
-            let rp = (r * cam.scale).max(0.0);
-            let n = ((sweep.abs() * (2.0 * rp).sqrt() / 1.5).ceil() as usize).clamp(1, 1024);
-            for k in 0..n {
-                out.push(cam.to_screen(c + dir(theta0 + sweep * k as f64 / n as f64) * r));
-            }
+impl Cam {
+    /// Passage à l'écran pour les tracés découpés à la vue (ADR-31).
+    fn map(&self) -> ScreenMap {
+        let c = self.rect.center();
+        let v = self.rect.expand(8.0);
+        ScreenMap {
+            center: self.center,
+            scale: self.scale,
+            origin: (c.x as f64, c.y as f64),
+            rect: [
+                v.min.x as f64,
+                v.min.y as f64,
+                v.max.x as f64,
+                v.max.y as f64,
+            ],
         }
     }
-}
-
-fn loop_points(l: &Loop, cam: &Cam) -> Vec<Pos2> {
-    let mut v = Vec::new();
-    for s in &l.segs {
-        seg_points(s, cam, &mut v);
-    }
-    v
 }
 
 /// Journal du diagnostic de performance : TRACERY_PERF=1 écrit sur la
@@ -1390,18 +1413,21 @@ fn bbox_inter(a: &geom::BBox, b: &geom::BBox) -> Option<geom::BBox> {
 /// Forme du canevas : id, contour, remplage visible, traits vus d'une porte.
 type CanvasItem = (u64, Region, Option<Arc<Design>>, Option<Arc<DoorDrawing>>);
 
-/// Polylignes (traits vus d'une porte), hors champ écartées.
+/// Polylignes (traits vus d'une porte), découpées à la vue.
 fn draw_polylines(p: &egui::Painter, lines: &[Vec<P2>], cam: &Cam, stroke: Stroke) {
-    let vis = cam.rect.expand(4.0);
+    let map = cam.map();
     for l in lines {
-        let pts: Vec<Pos2> = l.iter().map(|q| cam.to_screen(*q)).collect();
-        if pts.len() >= 2 && Rect::from_points(&pts).intersects(vis) {
-            p.add(Shape::line(pts, stroke));
+        let mut c = Clipper::new(map);
+        c.polyline(l);
+        for v in c.finish() {
+            p.add(Shape::line(v, stroke));
         }
     }
 }
 
+/// Contours d'une région, découpés à la vue.
 fn draw_region(p: &egui::Painter, r: &Region, cam: &Cam, stroke: Stroke) {
+    let map = cam.map();
     let vis = cam.rect.expand(4.0);
     for l in r.loops() {
         let bb = l.bbox();
@@ -1409,39 +1435,50 @@ fn draw_region(p: &egui::Painter, r: &Region, cam: &Cam, stroke: Stroke) {
         if !sr.intersects(vis) {
             continue;
         }
-        let pts = loop_points(l, cam);
-        if pts.len() >= 2 {
-            p.add(Shape::closed_line(pts, stroke));
+        let (pieces, closed) = loop_pieces(l, map);
+        for mut v in pieces {
+            if closed {
+                v.pop();
+                p.add(Shape::closed_line(v, stroke));
+            } else {
+                p.add(Shape::line(v, stroke));
+            }
         }
     }
 }
 
+/// Tracés de construction (cercles et axes en tirets, centres), découpés
+/// à la vue : à fort zoom, seuls les tirets visibles sont créés.
 fn draw_construction(
     p: &egui::Painter,
     cons: &[ConstructionEntity],
     cam: &Cam,
     pal: &CanvasPalette,
 ) {
+    let map = cam.map();
     let st = Stroke::new(1.0, pal.cons);
+    let vis = cam.rect.expand(4.0);
     for c in cons {
         match *c {
             ConstructionEntity::Circle { c, r, .. } => {
-                let mut pts = loop_points(&Loop::circle(c, r), cam);
-                if let Some(f) = pts.first().copied() {
-                    pts.push(f);
+                let mut cl = Clipper::new(map);
+                cl.arc(c, r, 0.0, TAU);
+                for v in cl.finish() {
+                    p.extend(Shape::dashed_line(&v, st, 6.0, 4.0));
                 }
-                p.extend(Shape::dashed_line(&pts, st, 6.0, 4.0));
             }
             ConstructionEntity::Line { a, b, .. } => {
-                p.extend(Shape::dashed_line(
-                    &[cam.to_screen(a), cam.to_screen(b)],
-                    Stroke::new(1.0, pal.axis),
-                    6.0,
-                    4.0,
-                ));
+                let mut cl = Clipper::new(map);
+                cl.line(a, b);
+                for v in cl.finish() {
+                    p.extend(Shape::dashed_line(&v, Stroke::new(1.0, pal.axis), 6.0, 4.0));
+                }
             }
             ConstructionEntity::Point { p: q, .. } => {
-                p.circle_filled(cam.to_screen(q), 2.2, pal.point);
+                let s = cam.to_screen(q);
+                if vis.contains(s) {
+                    p.circle_filled(s, 2.2, pal.point);
+                }
             }
         }
     }
@@ -3044,20 +3081,20 @@ impl TraceryApp {
                 continue;
             }
             let Some(r) = s.region() else { continue };
-            let bb = r.bbox();
-            let rect = Rect::from_two_pos(cam.to_screen(bb.min), cam.to_screen(bb.max)).expand(6.0);
-            painter.add(Shape::dashed_line(
-                &[
-                    rect.left_top(),
-                    rect.right_top(),
-                    rect.right_bottom(),
-                    rect.left_bottom(),
-                    rect.left_top(),
-                ],
-                Stroke::new(1.0, col),
-                5.0,
-                4.0,
-            ));
+            // cadre à 6 px de la boîte, découpé à la vue : à fort zoom, son
+            // pourtour ferait des millions de tirets (ADR-31)
+            let bb = r.bbox().grow(6.0 / cam.scale);
+            let mut cl = Clipper::new(cam.map());
+            cl.polyline(&[
+                bb.min,
+                P2::new(bb.max.x, bb.min.y),
+                bb.max,
+                P2::new(bb.min.x, bb.max.y),
+                bb.min,
+            ]);
+            for v in cl.finish() {
+                painter.add(Shape::dashed_line(&v, Stroke::new(1.0, col), 5.0, 4.0));
+            }
         }
         if let Some(node) = self.selected_node()
             && let Some(r) = &node.region
