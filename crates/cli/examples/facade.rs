@@ -31,11 +31,12 @@ fn main() {
     let d = generate(&shape, &g, &c).expect("façade");
     let p = engine::facade::plan(&shape.bbox(), &g);
     println!(
-        "{} étages, {} travées, {} tours, {} échauguettes, {} ouvertures, {} ornements, {:.0} ms",
+        "{} étages, {} travées, {} tours, {} échauguettes, {} cheminées, {} ouvertures, {} ornements, {:.0} ms",
         p.floors.len() - 1,
         p.columns.len(),
         p.towers.len(),
         p.bartizans.len(),
+        p.chimneys.len(),
         p.openings.len(),
         d.ornaments.len(),
         t0.elapsed().as_secs_f64() * 1000.0

@@ -157,6 +157,14 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   octogonales qui montent d'un étage au-dessus de la corniche,
   échauguettes en encorbellement aux angles (planche `v08_facade.png`).
   Les croisées peuvent perdre leur couronnement (lucarnes).
+- v0.8.1 : façades (ADR-33) : toit à deux versants entre pignons de
+  pierre à crochets ; cheminées à souche carrée et fûts ronds groupés ;
+  portails plus grands (leur décor peut monter jusqu'au deuxième étage) ;
+  baies d'apparat (remplage ou croisée haute) au-dessus des portails ;
+  fenêtres des tours décalées d'un étage à l'autre ; baies plus grandes,
+  le décor de chaque niveau étant mesuré ; flèches des tours plus hautes
+  et évasées à la base ; échauguettes plus rares aux angles, parfois
+  accrochées à la tour.
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 

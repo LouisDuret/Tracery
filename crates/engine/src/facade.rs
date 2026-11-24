@@ -21,17 +21,17 @@
 //! (accolades, fleurons, appuis). Tout est construit à la règle et au
 //! compas et entièrement déterminé par la seed.
 
-use crate::design::{Design, Stats, TreeNode};
-use crate::door::{Out, cross_finial, rect_r};
+use crate::design::{Design, OrnKind, Stats, TreeNode};
+use crate::door::{Out, chou, cross_finial, rect_r};
 use crate::genome::{GENERATOR_VERSION, Genome, Params};
 use crate::rules::{unif, unif_in, weighted_index};
 use crate::score::ScoreBreakdown;
 use crate::seed::derived;
-use crate::style::{CrossKind, StyleParams, WindowKind};
+use crate::style::{CrossKind, Family, StyleParams, WindowKind};
 use crate::{CancelToken, GenError};
 use geom::clip::{intersect_loop, subtract, union};
 use geom::math::*;
-use geom::{BBox, ConstructionEntity, ConstructionOp, Loop, Region, Xf};
+use geom::{BBox, ConstructionEntity, ConstructionOp, Loop, Region, Seg, Xf};
 use motifs::{ArchKind, arch_window};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
@@ -66,6 +66,11 @@ pub struct PlannedOpening {
     pub tower: Option<usize>,
     /// Croisée d'une lucarne.
     pub dormer: bool,
+    /// Baie d'apparat au-dessus d'un portail, d'un autre style que les
+    /// fenêtres du niveau (remplage en arc brisé ou croisée haute).
+    pub special: bool,
+    /// Encombrement de son décor.
+    pub reach: Reach,
 }
 
 impl PlannedOpening {
@@ -91,22 +96,11 @@ impl PlannedOpening {
     pub fn decor_box(&self) -> BBox {
         let (x, y) = (self.center.x, self.center.y);
         let (hw, hh) = (0.5 * self.w, 0.5 * self.h);
-        if self.door {
-            let s = self.w;
-            BBox::from_pts(
-                P2::new(x - hw - DOOR_SIDE * s, y - hh),
-                P2::new(x + hw + DOOR_SIDE * s, y + hh + DOOR_UP * s),
-            )
-        } else {
-            let w = self.w;
-            BBox::from_pts(
-                P2::new(x - hw - WIN_SIDE * w, y - hh - WIN_DOWN * w),
-                P2::new(
-                    x + hw + WIN_SIDE * w,
-                    y + hh + if self.dormer { 0.02 } else { WIN_UP } * w,
-                ),
-            )
-        }
+        let (r, s) = (self.reach, self.w);
+        BBox::from_pts(
+            P2::new(x - hw - r.side * s, y - hh - r.down * s),
+            P2::new(x + hw + r.side * s, y + hh + r.up * s),
+        )
     }
 }
 
@@ -143,6 +137,9 @@ pub struct TowerPlan {
     /// Échauguette : hauteur du cul-de-lampe sous le fût (0 : tour posée
     /// au sol).
     pub corbel: f64,
+    /// Niveaux de relief ajoutés (échauguette accrochée à une tour, qui
+    /// passe devant elle).
+    pub lift: u8,
 }
 
 impl TowerPlan {
@@ -180,18 +177,33 @@ fn tower_edges(n: usize, r: f64) -> Vec<f64> {
     xs
 }
 
-/// Toit du logis, vu du long pan : trapèze dont les côtés sont les
-/// arêtiers des croupes.
+/// Toit du logis à deux versants, vu du long pan : un rectangle d'ardoise
+/// de l'égout au faîtage, entre deux pignons de pierre vus de chant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Roof {
     /// Égout (haut de la corniche).
     pub y0: f64,
     /// Hauteur jusqu'au faîtage.
     pub h: f64,
-    /// Retrait du faîtage aux deux bouts (croupes).
-    pub inset: f64,
-    /// Débord de l'égout au-delà du mur.
-    pub over: f64,
+    /// Épaisseur des pignons.
+    pub gable: f64,
+}
+
+/// Cheminée : souche carrée à tablette, fûts ronds groupés à couronne
+/// évasée ornée de rosaces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Chimney {
+    pub xc: f64,
+    /// Pied de la souche (sur le toit ou le pignon).
+    pub y0: f64,
+    /// Haut de la souche (sous la tablette).
+    pub base_top: f64,
+    /// Largeur de la souche.
+    pub w: f64,
+    /// Nombre de fûts vus.
+    pub shafts: usize,
+    /// Haut des fûts (sous la couronne).
+    pub shaft_top: f64,
 }
 
 /// Lucarne de pierre posée sur la corniche (ou derrière la balustrade),
@@ -249,9 +261,10 @@ pub struct FacadePlan {
     /// Corniche : (bas, haut).
     pub cornice: (f64, f64),
     pub balustrade: Option<(f64, f64)>,
-    /// Toit à croupes posé sur la corniche (derrière la balustrade).
+    /// Toit à deux versants posé sur la corniche (derrière la balustrade).
     pub roof: Roof,
     pub dormers: Vec<Dormer>,
+    pub chimneys: Vec<Chimney>,
     pub towers: Vec<TowerPlan>,
     /// Échauguettes aux angles, en encorbellement.
     pub bartizans: Vec<TowerPlan>,
@@ -279,6 +292,91 @@ fn fit_window(win: &mut Win, room: f64, up: f64) {
     let h = (room / (1.0 + up * ratio)).max(0.0);
     win.h = h;
     win.w = ratio * h;
+}
+
+/// Encombrement du décor d'une ouverture, en largeurs de la baie (en
+/// portées pour une porte) : au-dessus de son arête haute (sa clé), sous
+/// son arête basse, de chaque côté.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reach {
+    pub up: f64,
+    pub down: f64,
+    pub side: f64,
+}
+
+impl Reach {
+    /// Pire cas mesuré d'une croisée.
+    pub const WINDOW: Reach = Reach {
+        up: WIN_UP,
+        down: WIN_DOWN,
+        side: WIN_SIDE,
+    };
+    /// Pire cas mesuré d'une porte.
+    pub const DOOR: Reach = Reach {
+        up: DOOR_UP,
+        down: 0.0,
+        side: DOOR_SIDE,
+    };
+}
+
+/// Décor réel d'une ouverture, mesuré en la générant : les générateurs de
+/// croisées et de portes sont invariants par homothétie, la mesure vaut
+/// pour toute baie de mêmes proportions et de même génome.
+fn measure(region: &Region, g: &Genome, fallback: Reach) -> Reach {
+    let bb = region.bbox();
+    let s = bb.size().x.max(1e-9);
+    match crate::generate(region, g, &CancelToken::new()) {
+        Ok(d) => {
+            let b = d.bbox();
+            let m = 0.02;
+            Reach {
+                up: ((b.max.y - bb.max.y) / s).max(0.0) + m,
+                down: ((bb.min.y - b.min.y) / s).max(0.0) + m,
+                side: ((b.max.x - bb.max.x).max(bb.min.x - b.min.x) / s).max(0.0) + m,
+            }
+        }
+        Err(_) => fallback,
+    }
+}
+
+/// Baie en arc brisé : portée `s`, hauteur totale `h`, seuil en (xc, y0).
+fn arch_region(kind: ArchKind, xc: f64, y0: f64, s: f64, h: f64) -> Region {
+    let ha = motifs::arch_curve(kind, s).height;
+    let jamb = (h - ha).max(0.0);
+    let (l, _) = arch_window(kind, s, jamb);
+    Region::simple(l.transform(&Xf::translate(P2::new(xc, y0 + jamb))))
+}
+
+/// Demi-largeur de prisme (sommet le plus écarté) pour un rayon unité.
+fn prism_half(sides: usize) -> f64 {
+    tower_edges(sides, 1.0)
+        .iter()
+        .fold(0.0f64, |m, x| m.max(x.abs()))
+}
+
+/// Les boîtes se chevauchent-elles ?
+fn overlap(a: &BBox, b: &BBox) -> bool {
+    a.min.x < b.max.x - 1e-9
+        && b.min.x < a.max.x - 1e-9
+        && a.min.y < b.max.y - 1e-9
+        && b.min.y < a.max.y - 1e-9
+}
+
+impl TowerPlan {
+    /// Boîte de la silhouette (cul-de-lampe, corniche, flèche comprises).
+    pub fn bbox(&self) -> BBox {
+        let flare = if self.corbel > 0.0 { 0.07 } else { 0.22 };
+        let hw = 0.5 * self.width + flare * self.width;
+        let lo = if self.corbel > 0.0 {
+            self.y0 - self.corbel - 0.1 * self.width
+        } else {
+            self.y0
+        };
+        BBox::from_pts(
+            P2::new(self.xc - hw, lo),
+            P2::new(self.xc + hw, self.y_top + self.cornice + 1.2 * self.top_h),
+        )
+    }
 }
 
 /// Plan de la façade inscrite dans `bb` (déterministe : boîte et génome).
@@ -313,25 +411,24 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     let yc0 = floors[n];
     let yc1 = yc0 + c_r * hu;
     let balustrade = balus.then_some((yc1, y1));
-    // toit : haut et raide, comme ceux des logis de la fin du gothique
+    // toit à deux versants entre deux pignons de pierre, haut et raide
     // (exhaussé de la balustrade : les lucarnes naissent au-dessus)
-    let roof_h = hu * unif_in(&mut rng, 0.8, 1.05) + (y1 - yc1);
+    let roof_h = hu * unif_in(&mut rng, 1.1, 1.45) + (y1 - yc1);
     let roof = Roof {
         y0: yc1,
         h: roof_h,
-        inset: (roof_h * unif_in(&mut rng, 0.55, 0.85)).min(0.35 * w),
-        over: 0.15 * c_r * hu,
+        gable: hu * unif_in(&mut rng, 0.1, 0.15),
     };
     let height = |k: usize| floors[k + 1] - floors[k];
 
     // -------------------------------------------------------- travées
     // Rythme irrégulier : travées de largeurs inégales (symétriques une
     // fois sur deux), trumeaux d'angle ; assez de mur aux angles qui
-    // portent une échauguette.
+    // portent une échauguette (rares).
     let bay_t = hu * unif_in(&mut rng, 0.85, 1.15);
     let bart_w = hu * unif_in(&mut rng, 0.3, 0.4);
     let side = unif(&mut rng) < 0.5;
-    let (mut bart_l, mut bart_r) = match weighted_index(&mut rng, &[0.4, 0.45, 0.15]) {
+    let (mut bart_l, mut bart_r) = match weighted_index(&mut rng, &[0.78, 0.1, 0.12]) {
         Some(1) => (true, true),
         Some(2) => (side, !side),
         _ => (false, false),
@@ -364,8 +461,8 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     for _ in 0..4 {
         let bays = layout(m_l, m_r);
         let bmin = bays.iter().fold(f64::INFINITY, |m, b| m.min(*b));
-        // décor d'une croisée haute ou d'une lucarne : 0,45 travée au plus
-        let need = |b_end: f64| 0.66 * bart_w + 0.45 * bmin + 0.03 * hu - 0.5 * b_end;
+        // décor d'une croisée haute ou d'une lucarne : 0,46 travée au plus
+        let need = |b_end: f64| 0.66 * bart_w + 0.46 * bmin + 0.03 * hu - 0.5 * b_end;
         if bart_l {
             m_l = m_l.max(need(bays[0]));
         }
@@ -446,20 +543,27 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     let free: Vec<usize> = (0..nb).filter(|i| !tower_cols.contains(i)).collect();
 
     // ---------------------------------------------------------- portes
+    // (pas sur une travée d'angle sous une échauguette)
+    let door_ok: Vec<usize> = free
+        .iter()
+        .copied()
+        .filter(|&i| !((i == 0 && bart_l) || (i == nb - 1 && bart_r)))
+        .collect();
+    let door_pool = if door_ok.is_empty() { &free } else { &door_ok };
     let mut door_cols: Vec<usize> = Vec::new();
-    if !free.is_empty() {
+    if !door_pool.is_empty() {
         let mid = nb / 2;
-        let first = if nb % 2 == 1 && free.contains(&mid) {
+        let first = if nb % 2 == 1 && door_pool.contains(&mid) {
             mid
         } else {
-            free[((unif(&mut rng) * free.len() as f64) as usize).min(free.len() - 1)]
+            door_pool[((unif(&mut rng) * door_pool.len() as f64) as usize).min(door_pool.len() - 1)]
         };
         door_cols.push(first);
         let twin = nb - 1 - first;
-        if free.len() >= 4
+        if door_pool.len() >= 4
             && twin != first
             && first.abs_diff(twin) >= 2
-            && free.contains(&twin)
+            && door_pool.contains(&twin)
             && unif(&mut rng) < 0.35
         {
             door_cols.push(twin);
@@ -491,28 +595,88 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     let door_kind = ArchKind::Pointed {
         rho: if unif(&mut rng) < 0.6 { 1.0 } else { 1.15 },
     };
+    // baies d'apparat au-dessus des portails, d'un autre style que les
+    // fenêtres du niveau : remplage flamboyant en arc brisé, ou croisée
+    // haute et étroite d'un génome à part
+    let sp_tracery = unif(&mut rng) < 0.5;
+    let sp_kind = ArchKind::Pointed {
+        rho: unif_in(&mut rng, 1.0, 1.25),
+    };
+    let sp_ratio = unif_in(&mut rng, 0.42, 0.56); // largeur / hauteur
+    let sp_h = unif_in(&mut rng, 0.95, 1.12); // hauteur / croisée du niveau
+    let sp_cross = if unif(&mut rng) < 0.5 {
+        CrossKind::Simple
+    } else {
+        CrossKind::Double
+    };
+    let sp_genome = Genome::new(
+        derived(genome.seed, 0x5BEC) % 1_000_000_000,
+        if sp_tracery {
+            StyleParams {
+                depth: 3,
+                ..StyleParams::for_family(Family::Flamboyant)
+            }
+        } else {
+            StyleParams {
+                window: WindowKind::Meneaux,
+                cross: sp_cross,
+                round_top: Some(true),
+                ..StyleParams::for_family(family)
+            }
+        },
+    );
+    // un remplage n'a pas de décor hors de sa forme
+    let sp_reach = if sp_tracery {
+        Reach {
+            up: 0.03,
+            down: 0.03,
+            side: 0.03,
+        }
+    } else {
+        measure(
+            &rect_r(0.0, 0.0, 1000.0 * sp_ratio, 1000.0),
+            &sp_genome,
+            Reach::WINDOW,
+        )
+    };
 
     // ---------------------------------------------- fenêtres, du haut
-    let mut wins: Vec<Win> = (0..n)
-        .map(|k| {
-            let hk = height(k);
-            if k == 0 {
-                let h = hk * unif_in(&mut rng, 0.3, 0.4);
-                Win {
-                    sill: hk * unif_in(&mut rng, 0.34, 0.42),
-                    h,
-                    w: (h * unif_in(&mut rng, 0.65, 0.9)).min(0.5 * bw),
-                }
-            } else {
-                let h = hk * unif_in(&mut rng, 0.46, 0.56);
-                Win {
-                    sill: hk * unif_in(&mut rng, 0.26, 0.32),
-                    h,
-                    w: (h * unif_in(&mut rng, 0.55, 0.72)).min(0.58 * bw),
-                }
-            }
-        })
-        .collect();
+    // Taille visée, proportions et allège de chaque niveau ; le décor de
+    // sa croisée (accolade, larmier, appui) est mesuré sur son génome : un
+    // niveau sans accolade a des baies plus grandes.
+    let mut wins: Vec<Win> = Vec::with_capacity(n);
+    let mut reach: Vec<Reach> = Vec::with_capacity(n);
+    for (k, gk) in genomes.iter().enumerate().take(n) {
+        let hk = height(k);
+        let (h, sill, ratio) = if k == 0 {
+            (
+                hk * unif_in(&mut rng, 0.36, 0.46),
+                hk * unif_in(&mut rng, 0.3, 0.38),
+                unif_in(&mut rng, 0.65, 0.9),
+            )
+        } else {
+            (
+                hk * unif_in(&mut rng, 0.6, 0.7),
+                hk * unif_in(&mut rng, 0.2, 0.25),
+                unif_in(&mut rng, 0.55, 0.75),
+            )
+        };
+        let r = measure(&rect_r(0.0, 0.0, 1000.0 * ratio, 1000.0), gk, Reach::WINDOW);
+        let mut win = Win {
+            sill,
+            h,
+            w: ratio * h,
+        };
+        // dans la plus étroite des travées, décor compris
+        let cap = 0.46 * bw / (0.5 + r.side);
+        if win.w > cap {
+            let f = cap / win.w;
+            win.w *= f;
+            win.h *= f;
+        }
+        wins.push(win);
+        reach.push(r);
+    }
     let mut cordons_at: Vec<Option<(f64, f64)>> = vec![None; n];
     // limite haute du décor des ouvertures du niveau k
     let mut lims = vec![yc0 - gap; n];
@@ -522,54 +686,118 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
         } else {
             match cordons_at[k + 1] {
                 Some((b, _)) => b - gap,
-                None => {
-                    let up = wins[k + 1];
-                    floors[k + 1] + up.sill - WIN_DOWN * up.w - gap
-                }
+                None => floors[k + 1] + wins[k + 1].sill - reach[k + 1].down * wins[k + 1].w - gap,
             }
         };
         lims[k] = lim;
         let room = lim - floors[k] - wins[k].sill;
-        fit_window(&mut wins[k], room, WIN_UP);
+        fit_window(&mut wins[k], room, reach[k].up);
         if has_cordon[k] {
-            let top = floors[k] + wins[k].sill - WIN_DOWN * wins[k].w - 0.01 * hu;
+            let top = floors[k] + wins[k].sill - reach[k].down * wins[k].w - 0.01 * hu;
             cordons_at[k] = Some((top - cordon_h, top));
         }
     }
     let cordons: Vec<(f64, f64)> = cordons_at.iter().flatten().copied().collect();
 
+    // ---------------------------------------------------------- portes
+    // Portails du logis, tous semblables et imposants : leur décor peut
+    // monter jusque sous les fenêtres du deuxième niveau (la croisée du
+    // premier, au-dessus de la porte, est alors omise).
+    let ha1 = motifs::arch_curve(door_kind, 1.0).height;
+    let mut ds = h0 * unif_in(&mut rng, 0.42, 0.52);
+    let mut dh = (h0 * unif_in(&mut rng, 0.7, 0.82)).max((ha1 + 0.6) * ds);
+    let door_reach = if door_cols.is_empty() {
+        Reach::DOOR
+    } else {
+        measure(
+            &arch_region(door_kind, 0.0, 0.0, 1000.0, 1000.0 * dh / ds),
+            &door_genome,
+            Reach::DOOR,
+        )
+    };
+    for &c in &door_cols {
+        for j in [c.wrapping_sub(1), c + 1] {
+            if j < nb {
+                let d = (columns[c] - columns[j]).abs();
+                let max_s = (d - 0.46 * bw - 0.02 * hu) / (0.5 + door_reach.side);
+                if ds > max_s {
+                    let f = (max_s / ds).max(0.0);
+                    ds *= f;
+                    dh *= f;
+                }
+            }
+        }
+    }
+    let takes = n >= 2 && y0 + dh + door_reach.up * ds > lims[0];
+    let door_lim = if takes { lims[1] } else { lims[0] };
+    if y0 + dh + door_reach.up * ds > door_lim {
+        let f = (door_lim - y0) / (dh + door_reach.up * ds);
+        ds *= f;
+        dh *= f;
+    }
+
     // ------------------------------------------------------ ouvertures
     let mut openings: Vec<PlannedOpening> = Vec::new();
-    let door = |rng: &mut ChaCha8Rng, xc: f64, s_max: f64, lim: f64, tower: Option<usize>| {
-        let mut s = s_max;
-        let ha = motifs::arch_curve(door_kind, 1.0).height;
-        let mut dh = (h0 * unif_in(rng, 0.5, 0.62)).max((ha + 0.5) * s);
-        let need = dh + DOOR_UP * s;
-        if need > lim - y0 {
-            let f = (lim - y0) / need;
-            s *= f;
-            dh *= f;
-        }
-        PlannedOpening {
-            door: true,
-            arch: Some(door_kind),
-            center: P2::new(xc, y0 + 0.5 * dh),
-            w: s,
-            h: dh,
-            genome: door_genome.clone(),
-            floor: 0,
-            tower,
-            dormer: false,
-        }
-    };
-    for (k, win) in wins.iter().enumerate() {
+    for k in 0..n {
+        let win = wins[k];
         for (i, &xc) in columns.iter().enumerate() {
             if tower_cols.contains(&i) {
                 continue;
             }
-            if k == 0 && door_cols.contains(&i) {
-                let s = (h0 * unif_in(&mut rng, 0.28, 0.36)).min(0.45 * bays[i]);
-                openings.push(door(&mut rng, xc, s, lims[0], None));
+            if door_cols.contains(&i) {
+                if k == 0 {
+                    openings.push(PlannedOpening {
+                        door: true,
+                        arch: Some(door_kind),
+                        center: P2::new(xc, y0 + 0.5 * dh),
+                        w: ds,
+                        h: dh,
+                        genome: door_genome.clone(),
+                        floor: 0,
+                        tower: None,
+                        dormer: false,
+                        special: false,
+                        reach: door_reach,
+                    });
+                    continue;
+                }
+                if k == 1 && takes {
+                    continue;
+                }
+                // au-dessus du portail : une baie d'apparat, le bas de son
+                // décor au niveau de celui des croisées (au-dessus du cordon)
+                let foot = floors[k] + win.sill - reach[k].down * win.w;
+                let mut sw = Win {
+                    sill: 0.0,
+                    h: sp_h * win.h,
+                    w: sp_ratio * sp_h * win.h,
+                };
+                let cap = 0.46 * bw / (0.5 + sp_reach.side);
+                if sw.w > cap {
+                    let f = cap / sw.w;
+                    sw.w *= f;
+                    sw.h *= f;
+                }
+                for _ in 0..3 {
+                    let bot = foot + sp_reach.down * sw.w;
+                    fit_window(&mut sw, lims[k] - bot, sp_reach.up);
+                }
+                let bot = foot + sp_reach.down * sw.w;
+                if sw.h > 0.1 * hu && bot + sw.h + sp_reach.up * sw.w <= lims[k] + 1e-9 {
+                    openings.push(PlannedOpening {
+                        door: false,
+                        arch: sp_tracery.then_some(sp_kind),
+                        center: P2::new(xc, bot + 0.5 * sw.h),
+                        w: sw.w,
+                        h: sw.h,
+                        genome: sp_genome.clone(),
+                        floor: k,
+                        tower: None,
+                        dormer: false,
+                        special: true,
+                        reach: sp_reach,
+                    });
+                }
                 continue;
             }
             if win.w < 0.05 * hu || win.h < 0.05 * hu {
@@ -585,46 +813,58 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                 floor: k,
                 tower: None,
                 dormer: false,
+                special: false,
+                reach: reach[k],
             });
         }
     }
+    // demi-encombrement du décor des ouvertures de chaque travée
+    let col_half: Vec<f64> = columns
+        .iter()
+        .map(|&x| {
+            openings
+                .iter()
+                .filter(|o| (o.center.x - x).abs() < 1e-9)
+                .fold(0.0f64, |m, o| m.max((0.5 + o.reach.side) * o.w))
+        })
+        .collect();
 
     // ---------------------------------------------------- tours (suite)
     let mut towers: Vec<TowerPlan> = Vec::new();
     if !tower_cols.is_empty() {
         let mut width = (w - m_l - m_r) / nb as f64 * unif_in(&mut rng, 0.6, 0.78);
-        // place laissée par le décor des ouvertures voisines (corniche de
-        // la tour comprise)
+        // place laissée par le décor des ouvertures voisines (coyau de la
+        // flèche compris)
         for &c in &tower_cols {
             for j in [c.wrapping_sub(1), c + 1] {
                 if j < nb {
                     let d = (columns[c] - columns[j]).abs();
-                    width = width.min((d - 0.46 * bw - 0.03 * hu) / 0.6);
+                    width = width.min((d - col_half[j] - 0.03 * hu) / 0.74);
                 }
             }
         }
         let width = width.max(0.2 * hu);
         let sides = if unif(&mut rng) < 0.5 { 6 } else { 8 };
-        let half = tower_edges(sides, 1.0)
-            .iter()
-            .fold(0.0f64, |m, x| m.max(x.abs()));
-        let r = 0.5 * width / half;
+        let r = 0.5 * width / prism_half(sides);
         // un étage au-dessus de la corniche : les murs s'arrêtent vers le
         // faîtage du toit, auquel la tour donne accès
         let y_top = (yc0 + hu * unif_in(&mut rng, 0.92, 1.02)).min(yc1 + 0.95 * roof_h);
         let cornice = hu * unif_in(&mut rng, 0.18, 0.24);
-        let top = if unif(&mut rng) < 0.7 {
+        let top = if unif(&mut rng) < 0.85 {
             TowerTop::Spire
         } else {
             TowerTop::Crenels
         };
+        // flèche haute et aiguë, évasée à la base
         let top_h = match top {
-            TowerTop::Spire => width * unif_in(&mut rng, 0.95, 1.3),
+            TowerTop::Spire => width * unif_in(&mut rng, 2.0, 2.7),
             TowerTop::Crenels => hu * unif_in(&mut rng, 0.28, 0.36),
         };
         let band_h = 0.05 * hu;
         let tw_f = unif_in(&mut rng, 0.48, 0.6); // largeur des fenêtres / pan
         let t_ratio = unif_in(&mut rng, 1.5, 1.9);
+        // allège de chaque niveau : les fenêtres montent avec la vis
+        let stagger: Vec<f64> = (0..n).map(|_| unif_in(&mut rng, 0.18, 0.42)).collect();
         let with_door = unif(&mut rng) < 0.55;
         let d_f = unif_in(&mut rng, 0.55, 0.68);
         for (t, &c) in tower_cols.iter().enumerate() {
@@ -641,13 +881,14 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                 bands: floors[1..].to_vec(),
                 band_h,
                 corbel: 0.0,
+                lift: 0,
             };
             let front = tp.front();
             // un niveau de plus que la façade
             for k in 0..=n {
                 let (bot, lim, hk) = if k < n {
                     (
-                        floors[k] + 0.32 * height(k),
+                        floors[k] + stagger[k] * height(k) + WIN_DOWN * front * tw_f,
                         floors[k + 1] - 0.5 * band_h - gap,
                         height(k),
                     )
@@ -658,8 +899,27 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                     (bot, y_top - 0.4 * cornice - gap, hu)
                 };
                 if k == 0 && with_door {
-                    let s = front * d_f;
-                    openings.push(door(&mut rng, tp.xc, s, lim, Some(t)));
+                    let mut s = front * d_f;
+                    let mut th = (h0 * unif_in(&mut rng, 0.5, 0.6)).max((ha1 + 0.5) * s);
+                    let need = th + DOOR_UP * s;
+                    if need > lim - y0 {
+                        let f = (lim - y0) / need;
+                        s *= f;
+                        th *= f;
+                    }
+                    openings.push(PlannedOpening {
+                        door: true,
+                        arch: Some(door_kind),
+                        center: P2::new(tp.xc, y0 + 0.5 * th),
+                        w: s,
+                        h: th,
+                        genome: door_genome.clone(),
+                        floor: 0,
+                        tower: Some(t),
+                        dormer: false,
+                        special: false,
+                        reach: Reach::DOOR,
+                    });
                     continue;
                 }
                 let tw = front * tw_f;
@@ -683,6 +943,8 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                     floor: k,
                     tower: Some(t),
                     dormer: false,
+                    special: false,
+                    reach: Reach::WINDOW,
                 });
             }
             towers.push(tp);
@@ -690,14 +952,11 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     }
 
     // ----------------------------------------------------- échauguettes
-    // aux angles, en encorbellement : cul-de-lampe dans le dernier étage,
-    // fût à pans qui traverse la corniche, poivrière ou créneaux
+    // aux angles (rares), en encorbellement : cul-de-lampe dans le dernier
+    // étage, fût à pans qui traverse la corniche, poivrière ou créneaux
     let mut bartizans: Vec<TowerPlan> = Vec::new();
     if bart_l || bart_r {
         let sides = if unif(&mut rng) < 0.5 { 6 } else { 8 };
-        let half = tower_edges(sides, 1.0)
-            .iter()
-            .fold(0.0f64, |m, x| m.max(x.abs()));
         let y_body = yc0 - hu * unif_in(&mut rng, 0.3, 0.42);
         let corbel = hu * unif_in(&mut rng, 0.32, 0.42);
         let y_top = (yc1 + hu * unif_in(&mut rng, 0.35, 0.5)).max(y1 + 0.2 * hu);
@@ -715,7 +974,7 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                 bartizans.push(TowerPlan {
                     xc,
                     sides,
-                    r: 0.5 * bart_w / half,
+                    r: 0.5 * bart_w / prism_half(sides),
                     width: bart_w,
                     y0: y_body,
                     y_top,
@@ -725,15 +984,61 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                     bands: Vec::new(),
                     band_h: 0.0,
                     corbel,
+                    lift: 0,
                 });
             }
         }
     }
+    // échauguettes accrochées aux tours (deux tours sur cinq), sous leur
+    // corniche, d'un côté où le décor de la travée voisine laisse la place
+    for (ti, t) in towers.iter().enumerate() {
+        if unif(&mut rng) >= 0.4 {
+            continue;
+        }
+        let c = tower_cols[ti];
+        let pref = unif(&mut rng) < 0.5;
+        let y_tb = t.y_top - hu * unif_in(&mut rng, 0.66, 0.8);
+        let y_b = (yc0 - hu * unif_in(&mut rng, 0.05, 0.2)).min(y_tb - 0.35 * hu);
+        let corbel = hu * unif_in(&mut rng, 0.28, 0.36);
+        let k_h = unif_in(&mut rng, 1.3, 1.6);
+        for right in [pref, !pref] {
+            let sg = if right { 1.0 } else { -1.0 };
+            let j = if right { c + 1 } else { c.wrapping_sub(1) };
+            let room = if j < nb {
+                (columns[j] - t.xc).abs() - col_half[j] - 0.03 * hu
+            } else {
+                f64::INFINITY
+            };
+            let bwb = (0.42 * t.width).min((room - 0.5 * t.width) / 0.78);
+            if bwb < 0.18 * hu {
+                continue;
+            }
+            bartizans.push(TowerPlan {
+                xc: t.xc + sg * (0.5 * t.width + 0.15 * bwb),
+                sides: t.sides,
+                r: 0.5 * bwb / prism_half(t.sides),
+                width: bwb,
+                y0: y_b,
+                y_top: y_tb,
+                cornice: 0.12 * hu,
+                top: TowerTop::Spire,
+                top_h: bwb * k_h,
+                bands: Vec::new(),
+                band_h: 0.0,
+                corbel,
+                lift: 1,
+            });
+            break;
+        }
+    }
+    let bart_boxes: Vec<BBox> = bartizans.iter().map(|b| b.bbox()).collect();
 
     // -------------------------------------------------------- lucarnes
-    // sur chaque travée sans tour, ou une sur deux ; leurs croisées ont
-    // toutes le même génome et la même taille
+    // sur chaque travée sans tour, ou une sur deux, entre les pignons ;
+    // leurs croisées ont toutes le même génome et la même taille
+    let ridge = roof.y0 + roof.h;
     let mut dormers: Vec<Dormer> = Vec::new();
+    let mut dormer_boxes: Vec<BBox> = Vec::new();
     {
         let every = nb < 4 || unif(&mut rng) < 0.65;
         let parity = (unif(&mut rng) < 0.5) as usize;
@@ -743,31 +1048,43 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
         let mut dw = (top.w * unif_in(&mut rng, 0.88, 1.0)).min(0.4 * bw);
         let ratio = unif_in(&mut rng, 1.25, 1.55);
         let g_r = unif_in(&mut rng, 0.6, 0.85);
+        let mut lg = genomes[n].clone();
+        lg.style.plain_top = true;
+        let dr = measure(
+            &rect_r(0.0, 0.0, 1000.0, 1000.0 * ratio),
+            &lg,
+            Reach {
+                up: 0.04,
+                ..Reach::WINDOW
+            },
+        );
         let base = y1;
-        let room = roof.y0 + roof.h + 0.12 * hu - base;
+        let room = ridge - base;
         let fixed = 0.05 * hu + 0.03 * hu;
-        let k_front = 1.0 + 2.0 * WIN_SIDE + 0.16;
-        let per = |dw: f64| fixed + dw * (WIN_DOWN + ratio + 0.02) + g_r * k_front * dw;
+        let k_front = 1.0 + 2.0 * dr.side + 0.16;
+        let per = |dw: f64| fixed + dw * (dr.down + ratio + dr.up) + g_r * k_front * dw;
         if per(dw) > room {
             dw *= (room - fixed).max(0.0) / (per(dw) - fixed);
         }
         if dw > 0.1 * hu {
             let wd = k_front * dw;
             let pin_w = 0.16 * wd;
-            let sill = base + 0.05 * hu + WIN_DOWN * dw;
+            let sill = base + 0.05 * hu + dr.down * dw;
             let dh = ratio * dw;
-            let y_gable = sill + dh + 0.02 * dw + 0.03 * hu;
-            let mut lg = genomes[n].clone();
-            lg.style.plain_top = true;
-            let hip_l = x0 - roof.over + roof.inset * (y_gable - roof.y0) / roof.h;
-            let hip_r = x0 + x1 - hip_l;
+            let y_gable = sill + dh + dr.up * dw + 0.03 * hu;
+            let (gl, gr) = (x0 + roof.gable + 0.02 * hu, x1 - roof.gable - 0.02 * hu);
             for (i, &xc) in columns.iter().enumerate() {
                 if tower_cols.contains(&i) || (!every && i % 2 != parity) {
                     continue;
                 }
-                // les croupes ne coupent ni la lucarne ni ses pinacles
+                // entre les pignons, loin des échauguettes
                 let half = 0.5 * wd + pin_w;
-                if xc - half < hip_l || xc + half > hip_r {
+                let dbox = BBox::from_pts(
+                    P2::new(xc - half, yc1),
+                    P2::new(xc + half, y_gable + g_r * wd + 0.45 * wd),
+                );
+                if xc - half < gl || xc + half > gr || bart_boxes.iter().any(|b| overlap(b, &dbox))
+                {
                     continue;
                 }
                 dormers.push(Dormer {
@@ -778,6 +1095,7 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                     gable_h: g_r * wd,
                     pin_w,
                 });
+                dormer_boxes.push(dbox);
                 openings.push(PlannedOpening {
                     door: false,
                     arch: None,
@@ -788,6 +1106,62 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
                     floor: n,
                     tower: None,
                     dormer: true,
+                    special: false,
+                    reach: dr,
+                });
+            }
+        }
+    }
+
+    // ------------------------------------------------------- cheminées
+    // Souche carrée à tablette, fûts ronds groupés à couronne évasée ;
+    // sur les pignons et sur le toit, là où ni lucarne ni tour ne gêne.
+    let mut chimneys: Vec<Chimney> = Vec::new();
+    {
+        let cw = hu * unif_in(&mut rng, 0.3, 0.38);
+        let shafts = if unif(&mut rng) < 0.55 { 2 } else { 3 };
+        let shaft_h = hu * unif_in(&mut rng, 0.5, 0.7);
+        let on_gables = unif(&mut rng) < 0.45;
+        let n_roof = weighted_index(&mut rng, &[0.4, 0.45, 0.15]).unwrap_or(1);
+        let mut cands: Vec<(f64, f64)> = Vec::new(); // (abscisse, pied)
+        if on_gables {
+            // à l'aplomb du mur : la tablette (0,58 souche) s'arrête au nu du pignon
+            for x in [x0 + 0.58 * cw, x1 - 0.58 * cw] {
+                cands.push((x, ridge - 0.25 * hu));
+            }
+        }
+        // sur le toit : au droit des trumeaux, puis des travées libres
+        let mut spots: Vec<f64> = columns.windows(2).map(|c| 0.5 * (c[0] + c[1])).collect();
+        spots.extend(columns.iter().copied());
+        let mut order: Vec<usize> = (0..spots.len()).collect();
+        for i in (1..order.len()).rev() {
+            let j = ((unif(&mut rng) * (i + 1) as f64) as usize).min(i);
+            order.swap(i, j);
+        }
+        let foot = ridge - roof.h * unif_in(&mut rng, 0.3, 0.45);
+        for &i in order.iter().take(n_roof) {
+            cands.push((spots[i], foot));
+        }
+        let base_top = ridge + 0.18 * hu;
+        let mut boxes: Vec<BBox> = Vec::new();
+        for (x, y_foot) in cands {
+            let bx = BBox::from_pts(
+                P2::new(x - 0.62 * cw, y_foot),
+                P2::new(x + 0.62 * cw, base_top + shaft_h + 0.2 * hu),
+            );
+            let clear = !dormer_boxes.iter().any(|b| overlap(b, &bx))
+                && !bart_boxes.iter().any(|b| overlap(b, &bx))
+                && !towers.iter().any(|t| overlap(&t.bbox(), &bx))
+                && !boxes.iter().any(|b| overlap(b, &bx));
+            if clear {
+                boxes.push(bx);
+                chimneys.push(Chimney {
+                    xc: x,
+                    y0: y_foot,
+                    base_top,
+                    w: cw,
+                    shafts,
+                    shaft_top: base_top + shaft_h,
                 });
             }
         }
@@ -811,6 +1185,7 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
         balustrade,
         roof,
         dormers,
+        chimneys,
         towers,
         bartizans,
         openings,
@@ -873,6 +1248,181 @@ fn corbels(xs: &[f64], y_top: f64, h: f64, cw: f64) -> Vec<Region> {
     v
 }
 
+/// Pans de la flèche (tour : coyau évasé à la base ; échauguette : cône
+/// droit), pieds des arêtiers et pointe.
+fn spire_faces(t: &TowerPlan) -> (Vec<Loop>, Vec<P2>, P2) {
+    let yr = t.y_top + t.cornice;
+    let apex = P2::new(t.xc, yr + t.top_h);
+    if t.corbel > 0.0 {
+        let ee = scaled_edges(t, 0.07 * t.width);
+        let faces = ee
+            .windows(2)
+            .map(|q| Loop::polygon(&[P2::new(q[0], yr), P2::new(q[1], yr), apex]))
+            .collect();
+        let hips = ee[1..ee.len() - 1]
+            .iter()
+            .map(|&x| P2::new(x, yr))
+            .collect();
+        return (faces, hips, apex);
+    }
+    let eave = scaled_edges(t, 0.22 * t.width);
+    let brk = scaled_edges(t, 0.06 * t.width);
+    let hf = 0.16 * t.top_h;
+    let yb = yr + hf;
+    // coyau : courbe concave de l'égout à la cassure, sous sa corde
+    let mid = |e: P2, b: P2| P2::new(e.x + 0.72 * (b.x - e.x), yr + 0.38 * hf);
+    let faces = eave
+        .windows(2)
+        .zip(brk.windows(2))
+        .map(|(e, b)| {
+            let (e0, e1) = (P2::new(e[0], yr), P2::new(e[1], yr));
+            let (b0, b1) = (P2::new(b[0], yb), P2::new(b[1], yb));
+            Loop::new(vec![
+                Seg::line(e0, e1),
+                Seg::through(e1, mid(e1, b1), b1),
+                Seg::line(b1, apex),
+                Seg::line(apex, b0),
+                Seg::through(b0, mid(e0, b0), e0),
+            ])
+            .oriented(true)
+        })
+        .collect();
+    let hips = brk[1..brk.len() - 1]
+        .iter()
+        .map(|&x| P2::new(x, yb))
+        .collect();
+    (faces, hips, apex)
+}
+
+/// Silhouette d'une tour ou d'une échauguette : les moulures du mur, le
+/// toit et les pignons s'y arrêtent.
+fn silhouette(t: &TowerPlan, ground: f64) -> Vec<Region> {
+    let (l, r) = (t.xc - 0.5 * t.width, t.xc + 0.5 * t.width);
+    let o = 0.09 * t.width;
+    let eps = 1e-6 * t.width;
+    let yr = t.y_top + t.cornice;
+    let mut v = if t.corbel > 0.0 {
+        // fût et cul-de-lampe (trapèze jusqu'au culot)
+        let yb = t.y0 - t.corbel;
+        let q = 0.12 * t.width;
+        union(
+            &[rect_r(l, t.y0 - eps, r, t.y_top)],
+            &Region::simple(Loop::polygon(&[
+                P2::new(t.xc - q, yb),
+                P2::new(t.xc + q, yb),
+                P2::new(r, t.y0),
+                P2::new(l, t.y0),
+            ])),
+        )
+    } else {
+        vec![rect_r(l, ground, r, t.y_top)]
+    };
+    v = union(&v, &rect_r(l - o, t.y_top - eps, r + o, yr));
+    match t.top {
+        TowerTop::Spire => {
+            let (faces, _, _) = spire_faces(t);
+            for f in faces {
+                let f = Region::simple(f.transform(&Xf::translate(P2::new(0.0, -eps))));
+                v = union(&v, &f);
+            }
+            v
+        }
+        TowerTop::Crenels => union(&v, &rect_r(l - o, yr - eps, r + o, yr + t.top_h)),
+    }
+}
+
+/// Cheminée : souche à assises et tablette, fûts ronds groupés à assises,
+/// couronnes évasées (congé, bandeau à rosace, listel), qui se rejoignent.
+fn chimney_parts(c: &Chimney, hu: f64) -> Vec<(OrnKind, u8, Region)> {
+    let mut v: Vec<(OrnKind, u8, Region)> = Vec::new();
+    let (xc, w) = (c.xc, c.w);
+    let lw = 0.004 * hu;
+    v.push((
+        OrnKind::Relief,
+        2,
+        rect_r(xc - 0.5 * w, c.y0, xc + 0.5 * w, c.base_top),
+    ));
+    let mut y = c.base_top - 0.14 * hu;
+    while y > c.y0 + 0.05 * hu {
+        v.push((
+            OrnKind::Creux,
+            1,
+            rect_r(xc - 0.5 * w, y - lw, xc + 0.5 * w, y + lw),
+        ));
+        y -= 0.14 * hu;
+    }
+    let tab = c.base_top + 0.06 * hu;
+    v.push((
+        OrnKind::Relief,
+        3,
+        rect_r(
+            xc - 0.53 * w,
+            c.base_top - 0.025 * hu,
+            xc + 0.53 * w,
+            c.base_top,
+        ),
+    ));
+    v.push((
+        OrnKind::Relief,
+        3,
+        rect_r(xc - 0.58 * w, c.base_top, xc + 0.58 * w, tab),
+    ));
+    let span = 0.88 * w;
+    let sw = span / c.shafts as f64;
+    for i in 0..c.shafts {
+        let x = xc - 0.5 * span + sw * (i as f64 + 0.5);
+        v.push((
+            OrnKind::Relief,
+            2,
+            rect_r(x - 0.46 * sw, tab, x + 0.46 * sw, c.shaft_top),
+        ));
+        let mut y = tab + 0.16 * hu;
+        while y < c.shaft_top - 0.05 * hu {
+            v.push((
+                OrnKind::Creux,
+                1,
+                rect_r(x - 0.46 * sw, y - lw, x + 0.46 * sw, y + lw),
+            ));
+            y += 0.16 * hu;
+        }
+        // couronne : congé évasé, bandeau à rosace, listel
+        let (yt, yc, yl) = (
+            c.shaft_top,
+            c.shaft_top + 0.07 * hu,
+            c.shaft_top + 0.15 * hu,
+        );
+        v.push((
+            OrnKind::Relief,
+            3,
+            Region::simple(Loop::polygon(&[
+                P2::new(x - 0.46 * sw, yt),
+                P2::new(x + 0.46 * sw, yt),
+                P2::new(x + 0.72 * sw, yc),
+                P2::new(x - 0.72 * sw, yc),
+            ])),
+        ));
+        v.push((
+            OrnKind::Relief,
+            3,
+            rect_r(x - 0.72 * sw, yc, x + 0.72 * sw, yl),
+        ));
+        v.push((
+            OrnKind::Creux,
+            2,
+            quatrefoil(
+                P2::new(x, 0.5 * (yc + yl)),
+                (0.3 * (yl - yc)).min(0.22 * sw),
+            ),
+        ));
+        v.push((
+            OrnKind::Relief,
+            3,
+            rect_r(x - 0.66 * sw, yl, x + 0.66 * sw, yl + 0.03 * hu),
+        ));
+    }
+    v
+}
+
 /// Quadrilobe de demi-encombrement `half`, centré en `c`.
 fn quatrefoil(c: P2, half: f64) -> Region {
     let unit = motifs::shapes::foil_outline(P2::ZERO, 1.0, 4, 1.15);
@@ -913,45 +1463,11 @@ pub fn generate_facade(
     };
     let big = 10.0 * (w + p.y1 - y0);
     // les tours passent devant le mur, ses moulures s'y arrêtent
-    // silhouette des tours : fût, corniche, flèche ou parapet
     let tower_cuts: Vec<Vec<Region>> = p
         .towers
         .iter()
         .chain(&p.bartizans)
-        .map(|t| {
-            let (l, r) = (t.xc - 0.5 * t.width, t.xc + 0.5 * t.width);
-            let o = 0.09 * t.width;
-            let yr = t.y_top + t.cornice;
-            let mut v = if t.corbel > 0.0 {
-                // fût et cul-de-lampe (trapèze jusqu'au culot)
-                let yb = t.y0 - t.corbel;
-                let q = 0.12 * t.width;
-                union(
-                    &[rect_r(l, t.y0 - 1e-6 * t.width, r, t.y_top)],
-                    &Region::simple(Loop::polygon(&[
-                        P2::new(t.xc - q, yb),
-                        P2::new(t.xc + q, yb),
-                        P2::new(r, t.y0),
-                        P2::new(l, t.y0),
-                    ])),
-                )
-            } else {
-                vec![rect_r(l, y0 - big, r, t.y_top)]
-            };
-            v = union(&v, &rect_r(l - o, t.y_top - 1e-6 * t.width, r + o, yr));
-            let top = match t.top {
-                TowerTop::Spire => {
-                    let ee = scaled_edges(t, 0.07 * t.width);
-                    Region::simple(Loop::polygon(&[
-                        P2::new(ee[0], yr - 1e-6 * t.width),
-                        P2::new(ee[ee.len() - 1], yr - 1e-6 * t.width),
-                        P2::new(t.xc, yr + t.top_h),
-                    ]))
-                }
-                TowerTop::Crenels => rect_r(l - o, yr - 1e-6 * t.width, r + o, yr + t.top_h),
-            };
-            union(&v, &top)
-        })
+        .map(|t| silhouette(t, y0 - big))
         .collect();
     let cut = |regs: Vec<Region>| -> Vec<Region> {
         let mut v = regs;
@@ -987,14 +1503,25 @@ pub fn generate_facade(
     // --------------------------------------------------------- cordons
     if !p.cordons.is_empty() {
         let p_co = out.node("Cordons");
+        // interrompus au droit des portails qui montent jusqu'à eux
+        let doors: Vec<Region> = p
+            .openings
+            .iter()
+            .filter(|o| o.door && o.tower.is_none())
+            .map(|o| {
+                let b = o.decor_box();
+                rect_r(b.min.x, b.min.y, b.max.x, b.max.y + 0.02 * hu)
+            })
+            .collect();
+        let gaps = |v: Vec<Region>| doors.iter().fold(v, |a, d| subtract(&a, d));
         for &(b, t) in &p.cordons {
             let h = t - b;
-            out.relief(&p_co, 2, cut(vec![rect_r(x0, b, x1, t)]));
+            out.relief(&p_co, 2, cut(gaps(vec![rect_r(x0, b, x1, t)])));
             // gorge sous le larmier
             out.creux(
                 &p_co,
                 1,
-                cut(vec![rect_r(x0, b + 0.22 * h, x1, b + 0.4 * h)]),
+                cut(gaps(vec![rect_r(x0, b + 0.22 * h, x1, b + 0.4 * h)])),
             );
         }
     }
@@ -1070,17 +1597,31 @@ pub fn generate_facade(
     cancelled()?;
 
     // ------------------------------------------------------------- toit
+    // deux versants entre deux pignons de pierre vus de chant
+    let ridge = p.roof.y0 + p.roof.h;
+    let chimney_rects: Vec<Region> = p
+        .chimneys
+        .iter()
+        .map(|c| {
+            rect_r(
+                c.xc - 0.62 * c.w,
+                c.y0,
+                c.xc + 0.62 * c.w,
+                c.shaft_top + 0.2 * hu,
+            )
+        })
+        .collect();
     {
         let rf = p.roof;
+        let g = rf.gable;
         let p_roof = out.node("Toit");
-        let (ya, yb) = (rf.y0, rf.y0 + rf.h);
-        let (la, ra) = (x0 - rf.over, x1 + rf.over);
-        let (lb, rb) = (x0 + rf.inset, x1 - rf.inset);
+        let (ya, yb) = (rf.y0, ridge);
+        let (la, ra) = (x0 + g, x1 - g);
         let face = Loop::polygon(&[
             P2::new(la, ya),
             P2::new(ra, ya),
-            P2::new(rb, yb),
-            P2::new(lb, yb),
+            P2::new(ra, yb),
+            P2::new(la, yb),
         ]);
         let mut roof_regs = vec![Region::simple(face.clone())];
         for d in &p.dormers {
@@ -1099,14 +1640,49 @@ pub fn generate_facade(
         for d in &p.dormers {
             rows = subtract(&rows, &d.silhouette());
         }
+        for c in &chimney_rects {
+            rows = subtract(&rows, c);
+        }
         out.creux(&p_roof, 1, cut(rows));
-        // crête de faîtage et épis aux bouts
+        // crête de faîtage
         let p_cr = out.node("Faîtage");
         let hc = 0.05 * hu;
-        out.relief(&p_cr, 2, cut(vec![rect_r(lb, yb, rb, yb + hc)]));
-        for x in [lb, rb] {
-            for (kind, lv, reg) in cross_finial(P2::new(x, yb + hc), 0.2 * hu) {
-                out.add(&p_cr, kind, lv, cut(vec![reg]));
+        out.relief(&p_cr, 2, cut(vec![rect_r(la, yb, ra, yb + hc)]));
+        // pignons : chaperon vu de chant, crochets sur l'arête, épi au
+        // sommet (sauf sous une cheminée)
+        let p_pg = out.node("Pignons");
+        let coping = 0.08 * hu;
+        for (xl, sg) in [(x0, -1.0), (x1 - g, 1.0)] {
+            out.relief(&p_pg, 2, cut(vec![rect_r(xl, yc1, xl + g, yb + coping)]));
+            let x_out = if sg < 0.0 { xl } else { xl + g };
+            let mut y = yc1 + 0.35 * hu;
+            let mut leaves = Vec::new();
+            while y < yb - 0.1 * hu {
+                leaves.extend(chou(
+                    P2::new(x_out, y),
+                    P2::new(sg, 0.0),
+                    P2::new(0.0, 1.0),
+                    0.1 * hu,
+                ));
+                y += 0.24 * hu;
+            }
+            out.relief(&p_pg, 3, cut(leaves));
+            let xm = xl + 0.5 * g;
+            if !p.chimneys.iter().any(|c| (c.xc - xm).abs() < c.w) {
+                for (kind, lv, reg) in cross_finial(P2::new(xm, yb + coping), 0.3 * hu) {
+                    out.add(&p_pg, kind, lv, cut(vec![reg]));
+                }
+            }
+        }
+    }
+    cancelled()?;
+
+    // -------------------------------------------------------- cheminées
+    if !p.chimneys.is_empty() {
+        let p_ch = out.node("Cheminées");
+        for c in &p.chimneys {
+            for (kind, lv, reg) in chimney_parts(c, hu) {
+                out.add(&p_ch, kind, lv, cut(vec![reg]));
             }
         }
     }
@@ -1213,10 +1789,23 @@ pub fn generate_facade(
         let p_t = out.node(&label);
         let e = t.edges();
         let (l, r) = (t.xc - 0.5 * t.width, t.xc + 0.5 * t.width);
+        // niveaux de relief (une échauguette accrochée passe devant sa tour)
+        let lv = |k: u8| (k + t.lift).min(3);
+        // les bandeaux et les arêtes d'une tour s'arrêtent à ses échauguettes
+        let shield: Vec<Region> = if t.corbel > 0.0 {
+            Vec::new()
+        } else {
+            p.bartizans
+                .iter()
+                .filter(|b| b.lift > 0 && (b.xc - t.xc).abs() < t.width)
+                .flat_map(|b| silhouette(b, y0 - big))
+                .collect()
+        };
+        let minus = |v: Vec<Region>| shield.iter().fold(v, |a, s| subtract(&a, s));
         // pans
         out.relief(
             &p_t,
-            1,
+            lv(1),
             facets(
                 &[rect_r(l, t.y0, r, t.y_top)],
                 &e,
@@ -1234,7 +1823,7 @@ pub fn generate_facade(
             let b = o.decor_box();
             ar = subtract(&ar, &rect_r(b.min.x, b.min.y, b.max.x, b.max.y));
         }
-        out.creux(&p_t, 1, ar);
+        out.creux(&p_t, 1, minus(ar));
         if t.corbel > 0.0 {
             // cul-de-lampe : cône à pans qui se resserre jusqu'au culot,
             // cerclé de trois moulures ; archère sur le pan de face
@@ -1255,18 +1844,18 @@ pub fn generate_facade(
                     ]))
                 })
                 .collect();
-            out.relief(&p_cl, 1, cone);
+            out.relief(&p_cl, lv(1), cone);
             let hm = 0.09 * t.corbel;
             for f in [0.0, 0.38, 0.72] {
                 let y = t.y0 - f * t.corbel;
                 // largeur du cône à cette hauteur, plus le débord de la moulure
                 let kw = 1.0 - (1.0 - k_bot) * f;
                 let o = (kw - 1.0) * 0.5 * t.width + 0.05 * t.width;
-                out.relief(&p_cl, 2, tower_band(t, o, y - hm, y));
+                out.relief(&p_cl, lv(2), tower_band(t, o, y - hm, y));
             }
             out.relief(
                 &p_cl,
-                3,
+                lv(3),
                 [Region::circle(
                     P2::new(t.xc, t.y0 - t.corbel),
                     0.09 * t.width,
@@ -1289,13 +1878,22 @@ pub fn generate_facade(
         let p_b = out.node(&format!("{label} : bandeaux"));
         if t.corbel <= 0.0 {
             let base_h = p.plinth.max(0.07 * hu) * 1.1;
-            out.relief(&p_b, 2, tower_band(t, 0.05 * t.width, t.y0, t.y0 + base_h));
+            out.relief(
+                &p_b,
+                2,
+                minus(tower_band(t, 0.05 * t.width, t.y0, t.y0 + base_h)),
+            );
         }
         for &yb in &t.bands {
             out.relief(
                 &p_b,
                 2,
-                tower_band(t, 0.035 * t.width, yb - 0.5 * t.band_h, yb + 0.5 * t.band_h),
+                minus(tower_band(
+                    t,
+                    0.035 * t.width,
+                    yb - 0.5 * t.band_h,
+                    yb + 0.5 * t.band_h,
+                )),
             );
         }
         // corniche : consoles, bandeau, larmier
@@ -1312,12 +1910,12 @@ pub fn generate_facade(
             .collect();
         out.relief(
             &p_c,
-            2,
+            lv(2),
             corbels(&xs, t.y_top, 0.4 * tc, 0.42 * t.width / nk as f64),
         );
         out.relief(
             &p_c,
-            2,
+            lv(2),
             tower_band(t, 0.06 * t.width, t.y_top, t.y_top + 0.6 * tc),
         );
         out.relief(
@@ -1329,13 +1927,8 @@ pub fn generate_facade(
         match t.top {
             TowerTop::Spire => {
                 let p_r = out.node(&format!("{label} : flèche"));
-                let ee = scaled_edges(t, 0.07 * t.width);
-                let apex = P2::new(t.xc, yr + t.top_h);
-                let mut faces = Vec::new();
-                for q in ee.windows(2) {
-                    faces.push(Loop::polygon(&[P2::new(q[0], yr), P2::new(q[1], yr), apex]));
-                }
-                out.relief(&p_r, 2, faces.iter().cloned().map(Region::simple));
+                let (faces, hips, apex) = spire_faces(t);
+                out.relief(&p_r, lv(2), faces.iter().cloned().map(Region::simple));
                 // assises d'ardoise et arêtiers
                 let nrow = (round(t.top_h / (0.09 * t.width)) as usize).clamp(6, 24);
                 let lw2 = 0.004 * t.width;
@@ -1347,8 +1940,7 @@ pub fn generate_facade(
                         rows.extend(intersect_loop(std::slice::from_ref(&strip), f));
                     }
                 }
-                for &x in &ee[1..ee.len() - 1] {
-                    let a = P2::new(x, yr);
+                for &a in &hips {
                     let n = perp(unit(apex - a)) * (1.5 * lw2);
                     rows.push(Region::simple(
                         Loop::polygon(&[a - n, a + n, apex + n, apex - n]).oriented(true),
@@ -1372,7 +1964,7 @@ pub fn generate_facade(
                     let xa = pl + 2.0 * mw * i as f64;
                     par = union(&par, &rect_r(xa, yr + 0.5 * hp, xa + mw, yr + hp));
                 }
-                out.relief(&p_r, 2, facets(&par, &ee, yr - 1.0, yr + 2.0 * hp));
+                out.relief(&p_r, lv(2), facets(&par, &ee, yr - 1.0, yr + 2.0 * hp));
             }
         }
         cancelled()?;
@@ -1513,6 +2105,10 @@ mod tests {
         let mut towers = 0;
         let mut dormers = 0;
         let mut bartizans = 0;
+        let mut corners = 0;
+        let mut chimneys = 0;
+        let mut specials = 0;
+        let (mut doors, mut door_w, mut wins, mut win_h) = (0, 0.0, 0, 0.0);
         let mut irregular = 0;
         for (w, h) in [
             (24000.0, 14000.0),
@@ -1537,7 +2133,8 @@ mod tests {
                         assert!(!ov, "{w}×{h} seed {seed} : décors chevauchés {a:?} {b:?}");
                     }
                     for &(cb, ct) in &p.cordons {
-                        if p.openings[i].tower.is_none() {
+                        // les portails interrompent les cordons
+                        if p.openings[i].tower.is_none() && !p.openings[i].door {
                             assert!(
                                 a.max.y <= cb + 1e-6 || a.min.y >= ct - 1e-6,
                                 "{w}×{h} seed {seed} : cordon traversé"
@@ -1554,11 +2151,13 @@ mod tests {
                     }
                 }
                 // même niveau : même génome, même taille
-                for o in p.openings.iter().filter(|o| !o.door && o.tower.is_none()) {
+                let plain = |o: &&PlannedOpening| !o.door && !o.special && o.tower.is_none();
+                for o in p.openings.iter().filter(plain) {
                     for q in p
                         .openings
                         .iter()
-                        .filter(|q| !q.door && q.tower.is_none() && q.floor == o.floor)
+                        .filter(plain)
+                        .filter(|q| q.floor == o.floor)
                     {
                         assert_eq!(o.genome, q.genome);
                         assert!((o.w - q.w).abs() < 1e-9 && (o.h - q.h).abs() < 1e-9);
@@ -1594,6 +2193,49 @@ mod tests {
                     }
                 }
                 bartizans += p.bartizans.len();
+                corners += p.bartizans.iter().filter(|b| b.lift == 0).count();
+                chimneys += p.chimneys.len();
+                specials += p.openings.iter().filter(|o| o.special).count();
+                for o in &p.openings {
+                    if o.door && o.tower.is_none() {
+                        doors += 1;
+                        door_w += o.w / p.storey;
+                    } else if !o.door && !o.special && o.tower.is_none() && !o.dormer && o.floor > 0
+                    {
+                        wins += 1;
+                        win_h += o.h / p.storey;
+                    }
+                }
+                // lucarnes et cheminées : loin des échauguettes et des tours
+                for t in p.bartizans.iter().chain(&p.towers) {
+                    let tb = t.bbox();
+                    for d in &p.dormers {
+                        let db = BBox::from_pts(
+                            P2::new(d.xc - 0.5 * d.w - d.pin_w, d.y0),
+                            P2::new(d.xc + 0.5 * d.w + d.pin_w, d.y_gable + d.gable_h),
+                        );
+                        if t.corbel > 0.0 {
+                            assert!(
+                                !overlap(&tb, &db),
+                                "{w}×{h} seed {seed} : lucarne sous une échauguette"
+                            );
+                        }
+                    }
+                    for c in &p.chimneys {
+                        // dans l'emprise du bâtiment
+                        assert!(
+                            c.xc - 0.58 * c.w >= p.x0 - 1e-6 && c.xc + 0.58 * c.w <= p.x1 + 1e-6
+                        );
+                        let cb = BBox::from_pts(
+                            P2::new(c.xc - 0.6 * c.w, c.y0),
+                            P2::new(c.xc + 0.6 * c.w, c.shaft_top),
+                        );
+                        assert!(
+                            !overlap(&tb, &cb),
+                            "{w}×{h} seed {seed} : cheminée dans une tour"
+                        );
+                    }
+                }
                 // travées irrégulières
                 if p.columns.len() >= 3 {
                     let g: Vec<f64> = p.columns.windows(2).map(|c| c[1] - c[0]).collect();
@@ -1615,7 +2257,14 @@ mod tests {
         }
         assert!(towers > 20, "trop peu de tours : {towers}");
         assert!(dormers > 100, "trop peu de lucarnes : {dormers}");
-        assert!(bartizans > 60, "trop peu d'échauguettes : {bartizans}");
+        assert!(bartizans > 25, "trop peu d'échauguettes : {bartizans}");
+        assert!(corners < 75, "trop d'échauguettes d'angle : {corners}");
+        assert!(chimneys > 60, "trop peu de cheminées : {chimneys}");
+        assert!(specials > 100, "trop peu de baies d'apparat : {specials}");
+        let door_w = door_w / doors.max(1) as f64;
+        assert!(door_w > 0.38, "portails trop étroits : {door_w}");
+        let win_h = win_h / wins.max(1) as f64;
+        assert!(win_h > 0.48, "fenêtres trop petites : {win_h}");
         assert!(irregular > 80, "travées trop régulières : {irregular}");
     }
 

@@ -76,6 +76,10 @@ fn opening_name(facade: &str, o: &engine::facade::PlannedOpening, n_floors: usiz
         "porte"
     } else if o.dormer {
         "lucarne"
+    } else if o.special && o.arch.is_some() {
+        "remplage d'apparat"
+    } else if o.special {
+        "croisée d'apparat"
     } else {
         "fenêtre"
     };

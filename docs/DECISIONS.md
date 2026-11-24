@@ -931,3 +931,66 @@ Planche `docs/planches/v08_facade.png`.
 
 **À venir.** Tours rondes ; fenêtres décalées des tours d'escalier ;
 cheminées.
+
+## ADR-33 — Façades : pignons, cheminées, portails, baies d'apparat (v0.8.1)
+
+**Contexte.** Retours du commanditaire sur la v0.8.0, avec de nouvelles
+gravures de référence (logis à tour d'escalier, échauguettes,
+cheminées) : toits à deux versants seulement, les bouts du logis étant
+des pignons de pierre ; échauguettes trop fréquentes, mais bienvenues
+accrochées à la tour ; portes trop petites ; flèches des tours plus
+hautes et aiguës, légèrement évasées à la base ; trop de mur entre les
+étages ; cheminées à souche carrée et fûts ronds groupés ; des fenêtres
+différentes des autres au-dessus des portes.
+
+**Décision.**
+
+- **Toit à deux versants** (1,1 à 1,45 étage, exhaussé de la
+  balustrade) : vu du long pan, un rectangle d'ardoise à assises, crête
+  de faîtage, entre deux **pignons** vus de chant (chaperon débordant,
+  crochets en chou frisé sur l'arête, croix d'épi au sommet sauf sous une
+  cheminée). Les lucarnes restent entre les pignons.
+- **Décor mesuré** (`Reach`, `measure`) : au lieu du pire cas (0,95
+  largeur au-dessus d'une croisée), le plan génère une croisée de chaque
+  niveau à ses proportions et mesure son décor (les générateurs sont
+  invariants par homothétie) ; de même pour les portes et les lucarnes.
+  Un niveau à larmier ou sans couronnement a ainsi des baies bien plus
+  grandes. Baies visées : 0,6 à 0,7 étage, allège 0,2 à 0,25 ; la largeur
+  reste bornée par la travée la plus étroite, décor compris.
+- **Portails** : 0,42 à 0,52 fois la hauteur du rez-de-chaussée de
+  portée, 0,7 à 0,82 de hauteur ; quand leur décor ne tient pas sous le
+  premier étage, il monte jusque sous le deuxième, la croisée du premier
+  étage de leur travée est omise et les cordons s'interrompent au droit
+  du portail.
+- **Baies d'apparat** : au-dessus des portails, les fenêtres de la
+  travée sont d'un autre style que celles du niveau : une fois sur deux
+  un remplage flamboyant en arc brisé (complexité 3, sans décor hors de
+  sa forme), sinon une croisée haute et étroite d'un génome à part
+  (croisée simple ou double, angles arrondis), le bas de leur décor au
+  niveau de celui des croisées. Les fenêtres des tours, des petites
+  croisées, montent d'un étage à l'autre à des hauteurs différentes,
+  comme les jours d'une vis. (Une version intermédiaire y mettait des
+  fentes : écartée, le commanditaire voulait des fenêtres différentes.)
+- **Flèches des tours** : 2 à 2,7 fois la largeur de la tour, coyau
+  évasé (égout débordant de 0,22 largeur, courbe concave jusqu'à la
+  cassure au sixième de la hauteur), arêtiers depuis la cassure ; la
+  tour s'élargit d'autant dans le calcul de la place laissée par les
+  travées voisines. Couronnement crénelé plus rare (15 %).
+- **Échauguettes** : aux angles moins d'une fois sur quatre ; accrochées
+  à une tour deux fois sur cinq, du côté où le décor de la travée voisine
+  laisse la place, sous la corniche de la tour et en avant d'elle (un
+  niveau de relief de plus, `lift`) ; les bandeaux et arêtes de la tour
+  s'y arrêtent. Lucarnes et cheminées les évitent.
+- **Cheminées** (`Chimney`) : souche carrée à assises et tablette,
+  deux ou trois fûts ronds à assises, couronnes évasées (congé, bandeau à
+  quadrilobe, listel) qui se rejoignent ; sur les pignons (moins d'une
+  fois sur deux), à l'aplomb du mur, et sur le toit au droit d'un trumeau
+  ou d'une travée libre, là où ni lucarne, ni tour, ni échauguette ne
+  gêne.
+
+**Conséquences.** Le plan génère jusqu'à n + 3 ouvertures d'essai (une
+croisée par niveau, la porte, la lucarne, la croisée d'apparat) : 20 à 180 ms selon la
+façade, au lieu de 2 ms. Les seeds de façade de la v0.8.0 donnent
+d'autres façades (le plan a changé) ; celles des fenêtres, portes et
+remplages ne changent pas. Planche `docs/planches/v08_facade.png`
+refaite.
