@@ -160,6 +160,10 @@ pub struct StyleParams {
     /// Façade : nombre d'étages (0 : selon les proportions).
     #[serde(skip_serializing_if = "is_zero")]
     pub floors: u8,
+    /// Façade : nombre de travées, colonnes de fenêtres ou de tours
+    /// (0 : selon les proportions).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub bays: u8,
     /// Façade : nombre de tours (None : selon la seed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub towers: Option<u8>,
@@ -203,6 +207,7 @@ impl Default for StyleParams {
             plain_top: false,
             facade: false,
             floors: 0,
+            bays: 0,
             towers: None,
             cordons: None,
         }

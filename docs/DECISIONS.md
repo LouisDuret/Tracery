@@ -994,3 +994,11 @@ façade, au lieu de 2 ms. Les seeds de façade de la v0.8.0 donnent
 d'autres façades (le plan a changé) ; celles des fenêtres, portes et
 remplages ne changent pas. Planche `docs/planches/v08_facade.png`
 refaite.
+
+**Réglages (v0.8.2).** Deux champs numériques dans le panneau de la
+façade : « Étages » (rez-de-chaussée compris, 1 à 8) et « Travées »
+(colonnes de fenêtres ou de tours, 1 à 24 ; une tour prend la place
+d'une colonne) ; 0, affiché « auto », laisse le choix aux proportions
+(`StyleParams::floors`, `StyleParams::bays`). Les largeurs des travées
+restent inégales ; les fenêtres s'y adaptent (bornées par la plus
+étroite). L'auto-test accepte `TRACERY_SMOKE_FACADE=étages,travées`.

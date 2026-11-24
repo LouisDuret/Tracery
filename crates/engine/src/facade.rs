@@ -445,7 +445,11 @@ pub fn plan(bb: &BBox, genome: &Genome) -> FacadePlan {
     } else {
         bay_t * unif_in(&mut rng, 0.05, 0.3)
     };
-    let nb = (round((w - pier_l - pier_r) / bay_t) as usize).max(1);
+    let nb = if st.bays > 0 {
+        st.bays.min(40) as usize
+    } else {
+        (round((w - pier_l - pier_r) / bay_t) as usize).max(1)
+    };
     let mut ratios: Vec<f64> = (0..nb).map(|_| unif_in(&mut rng, 0.72, 1.3)).collect();
     if sym {
         for i in 0..nb / 2 {
@@ -2272,10 +2276,30 @@ mod tests {
     fn reglages() {
         let mut g = facade(3);
         g.style.floors = 4;
+        g.style.bays = 7;
         g.style.towers = Some(0);
         g.style.cordons = Some(true);
         let p = plan(&bb(20000.0, 16000.0), &g);
         assert_eq!(p.floors.len(), 5);
+        assert_eq!(p.columns.len(), 7);
+        // les tours prennent des travées : sept colonnes en tout
+        for (floors, bays) in [(2u8, 3u8), (5, 9), (1, 1), (6, 12)] {
+            let mut g = facade(11);
+            g.style.floors = floors;
+            g.style.bays = bays;
+            g.style.towers = Some(2);
+            let p = plan(&bb(20000.0, 16000.0), &g);
+            assert_eq!(p.floors.len(), floors as usize + 1);
+            assert_eq!(p.columns.len(), bays as usize);
+            for (i, &x) in p.columns.iter().enumerate() {
+                let tower = p.towers.iter().any(|t| (t.xc - x).abs() < 1e-9);
+                let wins = p
+                    .openings
+                    .iter()
+                    .any(|o| o.tower.is_none() && (o.center.x - x).abs() < 1e-9);
+                assert!(tower || wins, "travée {i} vide ({floors} × {bays})");
+            }
+        }
         assert!(p.towers.is_empty());
         assert_eq!(p.cordons.len(), 3);
         g.style.towers = Some(2);

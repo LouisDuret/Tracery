@@ -165,6 +165,8 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   le décor de chaque niveau étant mesuré ; flèches des tours plus hautes
   et évasées à la base ; échauguettes plus rares aux angles, parfois
   accrochées à la tour.
+- v0.8.2 : façades : champs « Étages » et « Travées » (colonnes de
+  fenêtres ou de tours), 0 pour « auto » (ADR-33).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 

@@ -438,8 +438,17 @@ impl TraceryApp {
                     h: 14000.0,
                     angle: 0.0,
                 };
+                // TRACERY_SMOKE_FACADE=étages,travées (sinon selon les
+                // proportions)
+                let n: Vec<u8> = std::env::var("TRACERY_SMOKE_FACADE")
+                    .unwrap_or_default()
+                    .split(',')
+                    .filter_map(|t| t.trim().parse().ok())
+                    .collect();
                 let st = StyleParams {
                     facade: true,
+                    floors: n.first().copied().unwrap_or(0),
+                    bays: n.get(1).copied().unwrap_or(0),
                     ..StyleParams::for_family(Family::Flamboyant)
                 };
                 app.doc.add("Façade", Some(prim), None, st, 2);
@@ -2435,19 +2444,41 @@ impl TraceryApp {
             // réglages de la façade (ADR-32)
             let st = &mut s.genome.style;
             egui::Grid::new("facade").num_columns(2).show(ui, |ui| {
-                ui.label("Étages");
-                egui::ComboBox::from_id_salt("facade_etages")
-                    .selected_text(if st.floors == 0 {
-                        "selon les proportions".to_string()
+                // 0 : selon les proportions de la façade
+                let auto = |v: f64, _| {
+                    if v < 0.5 {
+                        "auto".to_string()
                     } else {
-                        st.floors.to_string()
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut st.floors, 0, "selon les proportions");
-                        for k in 1..=6u8 {
-                            ui.selectable_value(&mut st.floors, k, k.to_string());
-                        }
-                    });
+                        format!("{v:.0}")
+                    }
+                };
+                let parse = |t: &str| {
+                    let t = t.trim();
+                    if t.eq_ignore_ascii_case("auto") || t.is_empty() {
+                        Some(0.0)
+                    } else {
+                        t.parse::<f64>().ok()
+                    }
+                };
+                ui.label("Étages");
+                ui.add(
+                    egui::DragValue::new(&mut st.floors)
+                        .range(0..=8)
+                        .speed(0.05)
+                        .custom_formatter(auto)
+                        .custom_parser(parse),
+                )
+                .on_hover_text("Nombre d'étages, rez-de-chaussée compris (0 : selon les proportions).");
+                ui.end_row();
+                ui.label("Travées");
+                ui.add(
+                    egui::DragValue::new(&mut st.bays)
+                        .range(0..=24)
+                        .speed(0.05)
+                        .custom_formatter(auto)
+                        .custom_parser(parse),
+                )
+                .on_hover_text("Nombre de colonnes de fenêtres ; une tour prend la place d'une colonne (0 : selon les proportions).");
                 ui.end_row();
                 ui.label("Tours");
                 egui::ComboBox::from_id_salt("facade_tours")
@@ -2665,6 +2696,7 @@ impl TraceryApp {
                         plain_top: keep.plain_top,
                         facade: keep.facade,
                         floors: keep.floors,
+                        bays: keep.bays,
                         towers: keep.towers,
                         cordons: keep.cordons,
                         candidates: keep.candidates,
