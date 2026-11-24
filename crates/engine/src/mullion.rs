@@ -406,6 +406,9 @@ pub fn generate_mullion(
     };
     let crown =
         weighted_index(&mut rng, &[w_acc, w_hood, (1.0 - w_acc - w_hood).max(0.0)]).unwrap_or(2);
+    // sans couronnement (lucarne) : le tirage est fait quand même, pour
+    // que la suite de la seed ne change pas
+    let crown = if style.plain_top { 2 } else { crown };
     let b = f * unif_in(&mut rng, 0.45, 0.6); // largeur de la moulure
     let gap = f * unif_in(&mut rng, 0.15, 0.3); // jour entre chambranle et moulure
     let e = gap + 0.5 * b; // axe de la moulure, depuis l'arête

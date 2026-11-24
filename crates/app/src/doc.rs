@@ -116,6 +116,15 @@ impl PrimSpec {
     }
 }
 
+/// Ouvertures créées par une façade (ADR-32) : signature du plan qui les a
+/// produites (taille de la façade, génome) et position de la façade à ce
+/// moment (ses ouvertures la suivent quand elle se déplace).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Spawned {
+    pub sig: u64,
+    pub at: P2,
+}
+
 /// Forme du document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShapeItem {
@@ -124,6 +133,12 @@ pub struct ShapeItem {
     pub prim: Option<PrimSpec>,
     pub free: Option<Region>,
     pub genome: Genome,
+    /// Façade qui a créé cette fenêtre ou cette porte (ADR-32).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u64>,
+    /// Façade : plan dont sont issues ses ouvertures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned: Option<Spawned>,
 }
 
 impl ShapeItem {
@@ -182,6 +197,8 @@ impl Document {
             prim,
             free,
             genome: Genome::new(seed, style),
+            parent: None,
+            spawned: None,
         });
         id
     }
@@ -197,13 +214,40 @@ impl Document {
 
     pub fn to_project(&self) -> Project {
         let mut p = Project::new("mm");
+        // rang de chaque forme enregistrée (lien d'une ouverture à sa façade)
+        let saved: Vec<u64> = self
+            .shapes
+            .iter()
+            .filter(|s| s.region().is_some())
+            .map(|s| s.id)
+            .collect();
         for s in &self.shapes {
             if let Some(r) = s.region() {
+                // données de l'application : primitive, façade, ouvertures
+                let mut extra = s.prim.and_then(|pr| serde_json::to_value(pr).ok());
+                let parent = s
+                    .parent
+                    .and_then(|pid| saved.iter().position(|&i| i == pid));
+                if parent.is_some() || s.spawned.is_some() {
+                    let mut o = match extra.take() {
+                        Some(serde_json::Value::Object(o)) => o,
+                        _ => serde_json::Map::new(),
+                    };
+                    if let Some(i) = parent {
+                        o.insert("parent".into(), i.into());
+                    }
+                    if let Some(sp) = s.spawned
+                        && let Ok(v) = serde_json::to_value(sp)
+                    {
+                        o.insert("spawned".into(), v);
+                    }
+                    extra = Some(serde_json::Value::Object(o));
+                }
                 p.shapes.push(ProjectShape {
                     id: s.name.clone(),
                     region: RegionJson::from_region(&r),
                     genome: s.genome.clone(),
-                    extra: s.prim.and_then(|pr| serde_json::to_value(pr).ok()),
+                    extra,
                 });
             }
         }
@@ -217,7 +261,16 @@ impl Document {
             d.next_id += 1;
             let prim: Option<PrimSpec> =
                 s.extra.clone().and_then(|v| serde_json::from_value(v).ok());
+            let field = |k: &str| s.extra.as_ref().and_then(|v| v.get(k)).cloned();
+            // les formes sont numérotées dans l'ordre du fichier, depuis 1
+            let parent = field("parent")
+                .and_then(|v| v.as_u64())
+                .map(|i| i + 1)
+                .filter(|&i| (i as usize) <= p.shapes.len());
+            let spawned = field("spawned").and_then(|v| serde_json::from_value(v).ok());
             d.shapes.push(ShapeItem {
+                parent,
+                spawned,
                 id: d.next_id,
                 name: s.id.clone(),
                 free: if prim.is_some() {
@@ -241,20 +294,23 @@ impl Document {
 pub enum Category {
     Fenetre,
     Porte,
+    Facade,
 }
 
 impl Category {
-    pub const ALL: [Category; 2] = [Category::Fenetre, Category::Porte];
+    pub const ALL: [Category; 3] = [Category::Fenetre, Category::Porte, Category::Facade];
     pub fn label(self) -> &'static str {
         match self {
             Category::Fenetre => "Fenêtre",
             Category::Porte => "Porte",
+            Category::Facade => "Façade",
         }
     }
     pub fn types(self) -> &'static [Ouvrage] {
         match self {
             Category::Fenetre => &[Ouvrage::Remplage, Ouvrage::Meneaux, Ouvrage::Vitrail],
             Category::Porte => &[Ouvrage::Encadrement, Ouvrage::PorteBois],
+            Category::Facade => &[Ouvrage::Facade],
         }
     }
 }
@@ -269,11 +325,14 @@ pub enum Ouvrage {
     Vitrail,
     Encadrement,
     PorteBois,
+    Facade,
 }
 
 impl Ouvrage {
     pub fn of(st: &StyleParams) -> Ouvrage {
-        if st.iron {
+        if st.facade {
+            Ouvrage::Facade
+        } else if st.iron {
             Ouvrage::PorteBois
         } else if st.door {
             Ouvrage::Encadrement
@@ -290,17 +349,19 @@ impl Ouvrage {
     pub fn apply(self, st: &mut StyleParams) {
         st.door = self == Ouvrage::Encadrement;
         st.iron = self == Ouvrage::PorteBois;
+        st.facade = self == Ouvrage::Facade;
         match self {
             Ouvrage::Remplage => st.window = WindowKind::Remplage,
             Ouvrage::Meneaux => st.window = WindowKind::Meneaux,
             Ouvrage::Vitrail => st.window = WindowKind::Vitrail,
-            Ouvrage::Encadrement | Ouvrage::PorteBois => {}
+            Ouvrage::Encadrement | Ouvrage::PorteBois | Ouvrage::Facade => {}
         }
     }
     pub fn category(self) -> Category {
         match self {
             Ouvrage::Remplage | Ouvrage::Meneaux | Ouvrage::Vitrail => Category::Fenetre,
             Ouvrage::Encadrement | Ouvrage::PorteBois => Category::Porte,
+            Ouvrage::Facade => Category::Facade,
         }
     }
     pub fn label(self) -> &'static str {
@@ -310,6 +371,7 @@ impl Ouvrage {
             Ouvrage::Vitrail => "Vitrail",
             Ouvrage::Encadrement => "Encadrement de porte",
             Ouvrage::PorteBois => "Porte en bois",
+            Ouvrage::Facade => "Façade gothique",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -329,6 +391,9 @@ impl Ouvrage {
             Ouvrage::PorteBois => {
                 "Porte de bois à un ou deux vantaux (selon les proportions), ornée de ferrures gothiques : pentures à volutes, fourches et fleurs de lis, rinceaux, fleurons, clous, anneau et serrure."
             }
+            Ouvrage::Facade => {
+                "Mur de façade : étages, travées, fenêtres à meneaux (même style à chaque niveau), portes en arc brisé, soubassement, cordons, corniche, balustrade, tours à pans qui montent d'un étage de plus."
+            }
         }
     }
     /// Le générateur a-t-il son propre algorithme ?
@@ -342,6 +407,7 @@ impl Ouvrage {
         let kind = prim.map(|p| p.kind);
         match self {
             Ouvrage::PorteBois => matches!(kind, Some(PrimKind::Arch(_) | PrimKind::Rect)),
+            Ouvrage::Facade => matches!(kind, Some(PrimKind::Rect)),
             _ => true,
         }
     }
@@ -356,6 +422,7 @@ impl Ouvrage {
             let mut w = st.clone();
             w.door = false;
             w.iron = false;
+            w.facade = false;
             return Some(Ouvrage::of(&w));
         }
         c.types().iter().copied().find(|o| o.fits(prim))
@@ -405,10 +472,23 @@ impl Document {
     /// nouveaux identifiants (génome conservé : même remplage).
     pub fn paste(&mut self, items: &[ShapeItem], offset: P2) -> Vec<u64> {
         let mut ids = Vec::with_capacity(items.len());
+        // une ouverture collée avec sa façade la suit ; seule, elle devient
+        // une forme indépendante
+        let base = self.next_id;
+        let new_id = |old: u64| {
+            items
+                .iter()
+                .position(|s| s.id == old)
+                .map(|i| base + 1 + i as u64)
+        };
         for it in items {
             let mut s = it.clone();
             self.next_id += 1;
             s.id = self.next_id;
+            s.parent = s.parent.and_then(new_id);
+            if let Some(sp) = &mut s.spawned {
+                sp.at += offset;
+            }
             if !s.name.ends_with("(copie)") {
                 s.name = format!("{} (copie)", s.name);
             }
@@ -421,14 +501,68 @@ impl Document {
         ids
     }
 
-    /// Déplace un groupe de formes.
+    /// Déplace un groupe de formes. Les ouvertures d'une façade déplacée
+    /// avec elle ne bougent pas ici : elles suivent leur façade
+    /// (`follow_facades`).
     pub fn translate(&mut self, ids: &[u64], d: P2) {
         if d == P2::ZERO {
             return;
         }
-        for s in self.shapes.iter_mut().filter(|s| ids.contains(&s.id)) {
+        let skip: Vec<u64> = self
+            .shapes
+            .iter()
+            .filter(|s| s.parent.is_some_and(|p| ids.contains(&p)))
+            .map(|s| s.id)
+            .collect();
+        for s in self
+            .shapes
+            .iter_mut()
+            .filter(|s| ids.contains(&s.id) && !skip.contains(&s.id))
+        {
             s.transform(&Xf::translate(d));
         }
+    }
+
+    /// Ouvertures de la façade `id`.
+    pub fn children(&self, id: u64) -> Vec<u64> {
+        self.shapes
+            .iter()
+            .filter(|s| s.parent == Some(id))
+            .map(|s| s.id)
+            .collect()
+    }
+
+    /// Les formes `ids` et les ouvertures des façades qui en font partie.
+    pub fn with_children(&self, ids: &[u64]) -> Vec<u64> {
+        let mut v = ids.to_vec();
+        for s in &self.shapes {
+            if s.parent.is_some_and(|p| ids.contains(&p)) && !v.contains(&s.id) {
+                v.push(s.id);
+            }
+        }
+        v
+    }
+
+    /// Les ouvertures suivent leur façade déplacée (la façade garde, dans
+    /// `spawned.at`, sa position à la création des ouvertures). Renvoie
+    /// vrai si quelque chose a bougé.
+    pub fn follow_facades(&mut self) -> bool {
+        let mut moves: Vec<(u64, P2)> = Vec::new();
+        for s in &mut self.shapes {
+            if let (Some(sp), Some(p)) = (&mut s.spawned, &s.prim) {
+                let d = p.center - sp.at;
+                if d != P2::ZERO {
+                    sp.at = p.center;
+                    moves.push((s.id, d));
+                }
+            }
+        }
+        for &(pid, d) in &moves {
+            for s in self.shapes.iter_mut().filter(|s| s.parent == Some(pid)) {
+                s.transform(&Xf::translate(d));
+            }
+        }
+        !moves.is_empty()
     }
 
     /// Formes entièrement contenues dans la boîte (rectangle de sélection).
@@ -695,6 +829,76 @@ mod tests {
             d.get(1).unwrap().prim.is_some(),
             "la primitive reste paramétrique"
         );
+    }
+
+    /// Une façade et deux ouvertures : déplacement, collage, fichier projet.
+    #[test]
+    fn facade_et_ouvertures() {
+        let mut d = Document::default();
+        let rect = |x: f64, w: f64| PrimSpec {
+            kind: PrimKind::Rect,
+            center: P2::new(x, 0.0),
+            w,
+            h: w,
+            angle: 0.0,
+        };
+        let f = d.add(
+            "Façade",
+            Some(rect(0.0, 1000.0)),
+            None,
+            StyleParams::default(),
+            1,
+        );
+        let a = d.add(
+            "Fenêtre",
+            Some(rect(-200.0, 100.0)),
+            None,
+            StyleParams::default(),
+            2,
+        );
+        let b = d.add(
+            "Porte",
+            Some(rect(200.0, 100.0)),
+            None,
+            StyleParams::default(),
+            3,
+        );
+        d.get_mut(f).unwrap().spawned = Some(Spawned {
+            sig: 42,
+            at: P2::ZERO,
+        });
+        for id in [a, b] {
+            d.get_mut(id).unwrap().parent = Some(f);
+        }
+        assert_eq!(d.children(f), vec![a, b]);
+        assert_eq!(d.with_children(&[f]), vec![f, a, b]);
+        // la façade déplacée (seule ou avec ses ouvertures) les emmène une fois
+        let off = P2::new(30.0, -10.0);
+        d.translate(&[f, a], off);
+        assert!(d.follow_facades());
+        assert!(!d.follow_facades());
+        let ca = d.get(a).unwrap().prim.unwrap().center;
+        assert!(dist(ca, P2::new(-200.0, 0.0) + off) < 1e-9);
+        // collage : le lien suit la copie de la façade ; seule, l'ouverture
+        // devient indépendante
+        let ids = d.paste(&d.items(&[f, a, b]), P2::new(5.0, 5.0));
+        assert_eq!(d.get(ids[1]).unwrap().parent, Some(ids[0]));
+        assert!(
+            !d.follow_facades(),
+            "la copie a déjà ses ouvertures en place"
+        );
+        let alone = d.paste(&d.items(&[a]), P2::ZERO);
+        assert_eq!(d.get(alone[0]).unwrap().parent, None);
+        // fichier projet : liens et signature conservés
+        let back = Document::from_project(&d.to_project());
+        let json = |d: &Document| {
+            d.shapes
+                .iter()
+                .map(|s| (s.id, s.parent, s.spawned.map(|x| x.sig)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(json(&back), json(&d));
+        assert_eq!(back.get(f).unwrap().prim, d.get(f).unwrap().prim);
     }
 
     #[test]

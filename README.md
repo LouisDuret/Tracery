@@ -75,6 +75,17 @@ fichier journal, car la version optimisée n'a pas de console. Par défaut,
 wgpu choisit la carte graphique la plus puissante ; `WGPU_POWER_PREF=low`
 impose la carte intégrée.
 
+### Façade
+
+Dans l'application, l'outil « Façade » (H) : glisser un rectangle. Il
+devient un mur à étages avec corniches et tours ; ses fenêtres et ses
+portes sont des formes ordinaires, à modifier une à une. Planche d'une
+façade et de toutes ses ouvertures :
+
+```powershell
+cargo run --release -p cli --example facade -- 1 22000 14000 facade.png
+```
+
 ## Organisation
 
 ```

@@ -149,6 +149,31 @@ pub struct StyleParams {
     pub cross: CrossKind,
     /// Fenêtre à meneaux : angles hauts arrondis (None : selon la seed).
     pub round_top: Option<bool>,
+    /// Fenêtre à meneaux : sans couronnement (ni accolade ni larmier),
+    /// comme sous le gâble d'une lucarne (ADR-32).
+    #[serde(skip_serializing_if = "is_false")]
+    pub plain_top: bool,
+    /// Façade (ADR-32) : la forme est le mur d'une façade ; l'application
+    /// y crée fenêtres et portes.
+    #[serde(skip_serializing_if = "is_false")]
+    pub facade: bool,
+    /// Façade : nombre d'étages (0 : selon les proportions).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub floors: u8,
+    /// Façade : nombre de tours (None : selon la seed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub towers: Option<u8>,
+    /// Façade : corniches entre les étages (None : selon la seed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cordons: Option<bool>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(n: &u8) -> bool {
+    *n == 0
 }
 
 impl Default for StyleParams {
@@ -175,6 +200,11 @@ impl Default for StyleParams {
             window: WindowKind::Remplage,
             cross: CrossKind::Auto,
             round_top: None,
+            plain_top: false,
+            facade: false,
+            floors: 0,
+            towers: None,
+            cordons: None,
         }
     }
 }

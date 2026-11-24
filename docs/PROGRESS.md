@@ -147,6 +147,16 @@ Seeds dorées : `tests/golden/seeds.json` (test `engine/tests/golden.rs`).
   arcs échantillonnés sur leur seule partie visible. Porte en épure sombre
   zoomée ×3000 : 70 ms par image avant, 0,6 ms après, comme sans zoom ;
   mesure par `TRACERY_SMOKE_ZOOM`.
+- v0.8.0 : générateur de façades gothiques (ADR-32) : outil « Façade »
+  (H) ; un rectangle devient un mur à étages et travées inégales, avec
+  ses fenêtres à meneaux (même génome et même taille à chaque niveau) et
+  ses portes en arc brisé, créées comme des formes ordinaires modifiables
+  une à une ; soubassement, cordons sous les appuis, corniche à modillons
+  et arcature aveugle, balustrade à quadrilobes ; toit à croupes et
+  lucarnes gothiques (gâble, pinacles, épi) ; tours hexagonales ou
+  octogonales qui montent d'un étage au-dessus de la corniche,
+  échauguettes en encorbellement aux angles (planche `v08_facade.png`).
+  Les croisées peuvent perdre leur couronnement (lucarnes).
 - Mis de côté à la demande du commanditaire : le remplissage des formes
   libres (tracé à main levée).
 

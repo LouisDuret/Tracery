@@ -8,6 +8,7 @@ pub mod analysis;
 pub mod derive;
 pub mod design;
 pub mod door;
+pub mod facade;
 pub mod genome;
 pub mod grammar;
 pub mod hidden;
@@ -65,6 +66,9 @@ pub fn generate(shape: &Region, genome: &Genome, cancel: &CancelToken) -> Result
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = std::time::Instant::now();
     check_shape(shape)?;
+    if genome.style.facade {
+        return facade::generate_facade(shape, genome, cancel);
+    }
     if genome.style.iron {
         return iron::generate_iron(shape, genome, cancel);
     }

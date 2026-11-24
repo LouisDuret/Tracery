@@ -3,7 +3,7 @@
 //! favoris, barre d'état.
 
 use crate::doc::{
-    BoolOp, Category, Document, Handle, Ouvrage, PrimKind, PrimSpec, ShapeItem, boolean,
+    BoolOp, Category, Document, Handle, Ouvrage, PrimKind, PrimSpec, ShapeItem, Spawned, boolean,
     group_bbox, objects_from_text, objects_to_text,
 };
 use crate::selection::Selection;
@@ -31,6 +31,58 @@ enum Tool {
     Freehand,
     Polygon,
     Prim(PrimKind),
+    /// Façade (ADR-32) : un rectangle, ses fenêtres, portes et tours.
+    Facade,
+}
+
+impl Tool {
+    /// Primitive tracée en glissant (la façade est un rectangle).
+    fn prim_kind(self) -> Option<PrimKind> {
+        match self {
+            Tool::Prim(k) => Some(k),
+            Tool::Facade => Some(PrimKind::Rect),
+            _ => None,
+        }
+    }
+}
+
+/// Signature du plan d'une façade : ce qui décide de ses ouvertures
+/// (taille, orientation, génome), sans sa position. None : pas une façade.
+fn facade_sig(s: &ShapeItem) -> Option<u64> {
+    let p = s.prim.filter(|p| p.kind == PrimKind::Rect)?;
+    if !s.genome.style.facade {
+        return None;
+    }
+    let key = (
+        round(p.w * 1000.0) as i64,
+        round(p.h * 1000.0) as i64,
+        round(p.angle * 1e9) as i64,
+        s.genome.seed,
+        &s.genome.style,
+    );
+    Some(hash_bytes(&serde_json::to_vec(&key).unwrap_or_default()))
+}
+
+/// Nom d'une ouverture créée par une façade.
+fn opening_name(facade: &str, o: &engine::facade::PlannedOpening, n_floors: usize) -> String {
+    let level = match o.floor {
+        0 => "rez-de-chaussée".to_string(),
+        k if k >= n_floors && o.dormer => "comble".to_string(),
+        k if k >= n_floors => "étage haut".to_string(),
+        1 => "1er étage".to_string(),
+        k => format!("{k}e étage"),
+    };
+    let what = if o.door {
+        "porte"
+    } else if o.dormer {
+        "lucarne"
+    } else {
+        "fenêtre"
+    };
+    match o.tower {
+        Some(t) => format!("{facade} · tour {} · {what} · {level}", t + 1),
+        None => format!("{facade} · {what} · {level}"),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -373,7 +425,23 @@ impl TraceryApp {
         };
         if app.smoke.is_some() {
             app.doc = Document::default();
-            if std::env::var_os("TRACERY_SMOKE_MENEAUX").is_some() {
+            if std::env::var_os("TRACERY_SMOKE_FACADE").is_some() {
+                // façade gothique et ses ouvertures (ADR-32)
+                let prim = PrimSpec {
+                    kind: PrimKind::Rect,
+                    center: P2::new(0.0, 7000.0),
+                    w: 22000.0,
+                    h: 14000.0,
+                    angle: 0.0,
+                };
+                let st = StyleParams {
+                    facade: true,
+                    ..StyleParams::for_family(Family::Flamboyant)
+                };
+                app.doc.add("Façade", Some(prim), None, st, 2);
+                app.sel.set(app.doc.shapes.first().map(|s| s.id));
+                app.fit_on_door = app.sel.primary;
+            } else if std::env::var_os("TRACERY_SMOKE_MENEAUX").is_some() {
                 // croisée de pierre (ADR-30)
                 let prim = PrimSpec {
                     kind: PrimKind::Rect,
@@ -606,6 +674,106 @@ impl TraceryApp {
         self.sel_node = None;
         self.record_history(id);
         self.status = format!("{name} ajouté.");
+    }
+
+    /// Nouvelle façade (ADR-32) : ses ouvertures sont créées à l'image
+    /// suivante par `sync_facades`.
+    fn add_facade(&mut self, spec: PrimSpec) {
+        self.checkpoint();
+        let family = self
+            .current()
+            .map(|s| s.genome.style.family)
+            .unwrap_or(Family::Flamboyant);
+        let style = StyleParams {
+            facade: true,
+            ..StyleParams::for_family(family)
+        };
+        let id = self
+            .doc
+            .add("Façade", Some(spec), None, style, now_seed() % 100_000);
+        self.sel.set(Some(id));
+        self.sel_node = None;
+        self.record_history(id);
+        self.fit_on_door = Some(id);
+        self.status = "Façade ajoutée : fenêtres, portes et tours sont créées.".into();
+    }
+
+    /// Façades : les ouvertures suivent leur façade déplacée, et sont
+    /// recréées quand son plan change (taille, seed, réglages) ; celles
+    /// d'une forme qui n'est plus une façade sont retirées. Rien pendant le
+    /// glisser d'une poignée : on attend le relâchement.
+    fn sync_facades(&mut self) {
+        if matches!(self.drag, Drag::Handle { .. }) {
+            return;
+        }
+        self.doc.follow_facades();
+        let todo: Vec<u64> = self
+            .doc
+            .shapes
+            .iter()
+            .filter(|s| facade_sig(s) != s.spawned.map(|x| x.sig))
+            .map(|s| s.id)
+            .collect();
+        for id in todo {
+            self.spawn_openings(id);
+        }
+    }
+
+    /// (Re)crée les fenêtres et les portes de la façade `id`.
+    fn spawn_openings(&mut self, id: u64) {
+        let old = self.doc.children(id);
+        self.doc.shapes.retain(|s| !old.contains(&s.id));
+        let doc = &self.doc;
+        self.sel.retain(|i| doc.get(i).is_some());
+        let Some(f) = self.doc.get(id).cloned() else {
+            return;
+        };
+        let (Some(sig), Some(prim), Some(region)) = (facade_sig(&f), f.prim, f.region()) else {
+            if let Some(s) = self.doc.get_mut(id) {
+                s.spawned = None;
+            }
+            return;
+        };
+        let plan = engine::facade::plan(&region.bbox(), &f.genome);
+        let n_floors = plan.floors.len() - 1;
+        let rot = Xf::rotate_about(prim.center, prim.angle);
+        let mut n = 0;
+        for o in &plan.openings {
+            self.doc.next_id += 1;
+            let oid = self.doc.next_id;
+            let kind = match o.arch {
+                Some(k) => PrimKind::Arch(k),
+                None => PrimKind::Rect,
+            };
+            self.doc.shapes.push(ShapeItem {
+                id: oid,
+                name: opening_name(&f.name, o, n_floors),
+                prim: Some(PrimSpec {
+                    kind,
+                    center: rot.apply(o.center),
+                    w: o.w,
+                    h: o.h,
+                    angle: prim.angle,
+                }),
+                free: None,
+                genome: o.genome.clone(),
+                parent: Some(id),
+                spawned: None,
+            });
+            n += 1;
+        }
+        if let Some(s) = self.doc.get_mut(id) {
+            s.spawned = Some(Spawned {
+                sig,
+                at: prim.center,
+            });
+        }
+        self.status = format!(
+            "Façade : {} étage(s), {} travée(s), {} tour(s), {n} ouverture(s) créée(s).",
+            n_floors,
+            plan.columns.len(),
+            plan.towers.len()
+        );
     }
 
     fn record_history(&mut self, id: u64) {
@@ -1211,6 +1379,8 @@ impl TraceryApp {
                 prim: None,
                 free: Some(r),
                 genome: sa.genome.clone(),
+                parent: None,
+                spawned: None,
             });
             last = Some(id);
         }
@@ -1248,7 +1418,8 @@ impl TraceryApp {
 
     /// Supprime les formes sélectionnées.
     fn delete_selected(&mut self) {
-        let ids = self.sel.ids();
+        // une façade emporte ses ouvertures
+        let ids = self.doc.with_children(&self.sel.ids());
         if ids.is_empty() {
             return;
         }
@@ -1266,7 +1437,7 @@ impl TraceryApp {
 
     /// Copie la sélection dans le presse-papiers (Ctrl+C).
     fn copy_objects(&mut self, ctx: &egui::Context) {
-        let items = self.doc.items(&self.sel.ids());
+        let items = self.doc.items(&self.doc.with_children(&self.sel.ids()));
         if items.is_empty() {
             self.status = "Rien à copier : sélectionnez une ou plusieurs formes.".into();
             return;
@@ -1308,7 +1479,7 @@ impl TraceryApp {
 
     /// Duplique la sélection à côté d'elle-même.
     fn duplicate_selected(&mut self) {
-        let items = self.doc.items(&self.sel.ids());
+        let items = self.doc.items(&self.doc.with_children(&self.sel.ids()));
         if items.is_empty() {
             return;
         }
@@ -1522,6 +1693,7 @@ impl TraceryApp {
         let ctx = ui.ctx().clone();
         self.poll(&ctx);
         self.shortcuts(&ctx);
+        self.sync_facades();
         self.schedule();
         self.autosave();
         self.persist_settings(&ctx);
@@ -1578,6 +1750,7 @@ impl TraceryApp {
                             ("B", "Main levée"),
                             ("P / R / C", "Polygone / rectangle / cercle"),
                             ("A", "Arc brisé"),
+                            ("H", "Façade (rectangle : étages, fenêtres, portes, tours)"),
                             ("G", "Générer / régénérer"),
                             ("→ / ←", "Seed suivante / précédente"),
                             ("D", "Seed aléatoire"),
@@ -1740,6 +1913,9 @@ impl TraceryApp {
         }
         if plain(Key::A) {
             self.tool = Tool::Prim(PrimKind::Arch(self.arch_kind));
+        }
+        if plain(Key::H) {
+            self.tool = Tool::Facade;
         }
         if plain(Key::F) {
             self.fit_view_pending();
@@ -2029,6 +2205,12 @@ impl TraceryApp {
             "Arc brisé",
             "Glisser : portée × hauteur (A)",
         );
+        tool_button(
+            ui,
+            Tool::Facade,
+            "Façade",
+            "Glisser un rectangle : mur, étages, fenêtres et portes (modifiables une à une), corniches, tours (H)",
+        );
         ui.label("Type d'arc :");
         let before = self.arch_kind;
         egui::ComboBox::from_id_salt("arc")
@@ -2118,6 +2300,26 @@ impl TraceryApp {
 
     /// Choix de l'ouvrage (ADR-29) : catégorie (fenêtre, porte), puis type.
     fn ouvrage_ui(&mut self, ui: &mut egui::Ui, id: u64) {
+        let n_kids = self.doc.children(id).len();
+        let parent = self
+            .doc
+            .get(id)
+            .and_then(|s| s.parent)
+            .and_then(|p| self.doc.get(p))
+            .map(|p| (p.id, p.name.clone()));
+        if let Some((pid, pname)) = parent {
+            ui.horizontal_wrapped(|ui| {
+                ui.small("Créée par la façade");
+                if ui
+                    .small_button(&pname)
+                    .on_hover_text("Sélectionner la façade")
+                    .clicked()
+                {
+                    self.sel.set(Some(pid));
+                    self.sel_node = None;
+                }
+            });
+        }
         let Some(s) = self.doc.get_mut(id) else {
             return;
         };
@@ -2208,14 +2410,86 @@ impl TraceryApp {
                         ui.selectable_value(&mut st.round_top, Some(true), "arrondis");
                     });
                 ui.end_row();
+                ui.label("Couronnement");
+                let mut crown = !st.plain_top;
+                if ui
+                    .checkbox(&mut crown, "accolade ou larmier")
+                    .on_hover_text(
+                        "Décoché : ni accolade ni larmier, comme sous le gâble d'une lucarne.",
+                    )
+                    .changed()
+                {
+                    st.plain_top = !crown;
+                }
+                ui.end_row();
             });
             if !prim.is_some_and(|p| p.kind == PrimKind::Rect) {
                 ui.small("Angles arrondis, bases, appui et larmier : sur un rectangle seulement.");
             }
         }
+        if cur == Ouvrage::Facade {
+            // réglages de la façade (ADR-32)
+            let st = &mut s.genome.style;
+            egui::Grid::new("facade").num_columns(2).show(ui, |ui| {
+                ui.label("Étages");
+                egui::ComboBox::from_id_salt("facade_etages")
+                    .selected_text(if st.floors == 0 {
+                        "selon les proportions".to_string()
+                    } else {
+                        st.floors.to_string()
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut st.floors, 0, "selon les proportions");
+                        for k in 1..=6u8 {
+                            ui.selectable_value(&mut st.floors, k, k.to_string());
+                        }
+                    });
+                ui.end_row();
+                ui.label("Tours");
+                egui::ComboBox::from_id_salt("facade_tours")
+                    .selected_text(match st.towers {
+                        None => "selon la seed",
+                        Some(0) => "aucune",
+                        Some(1) => "une",
+                        Some(_) => "deux",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut st.towers, None, "selon la seed");
+                        ui.selectable_value(&mut st.towers, Some(0), "aucune");
+                        ui.selectable_value(&mut st.towers, Some(1), "une")
+                            .on_hover_text("Il faut au moins trois travées.");
+                        ui.selectable_value(&mut st.towers, Some(2), "deux")
+                            .on_hover_text("Il faut au moins cinq travées.");
+                    });
+                ui.end_row();
+                ui.label("Corniches entre étages");
+                egui::ComboBox::from_id_salt("facade_cordons")
+                    .selected_text(match st.cordons {
+                        None => "selon la seed",
+                        Some(true) => "à chaque étage",
+                        Some(false) => "aucune",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut st.cordons, None, "selon la seed");
+                        ui.selectable_value(&mut st.cordons, Some(true), "à chaque étage");
+                        ui.selectable_value(&mut st.cordons, Some(false), "aucune");
+                    });
+                ui.end_row();
+            });
+            ui.small(format!(
+                "{n_kids} fenêtre(s) et porte(s) : ce sont des formes ordinaires, à modifier une à une en les sélectionnant. Elles suivent la façade quand on la déplace ; changer sa taille, sa seed ou ces réglages les recrée."
+            ));
+            if ui
+                .button("Recréer les ouvertures")
+                .on_hover_text("Remplace les fenêtres et les portes par celles du plan de la façade (annulable).")
+                .clicked()
+            {
+                s.spawned = None;
+            }
+        }
         if want != cur {
             want.apply(&mut s.genome.style);
-            if want.category() == Category::Porte {
+            if matches!(want.category(), Category::Porte | Category::Facade) {
                 // recadrer sur le décor de la porte dès la génération reçue
                 self.fit_on_door = Some(id);
             }
@@ -2384,6 +2658,11 @@ impl TraceryApp {
                         window: keep.window,
                         cross: keep.cross,
                         round_top: keep.round_top,
+                        plain_top: keep.plain_top,
+                        facade: keep.facade,
+                        floors: keep.floors,
+                        towers: keep.towers,
+                        cordons: keep.cordons,
                         candidates: keep.candidates,
                         temperature: keep.temperature,
                         ..StyleParams::for_family(st.family)
@@ -2620,11 +2899,11 @@ impl TraceryApp {
             }
         });
         ui.separator();
-        let shapes: Vec<(u64, String)> = self
+        let shapes: Vec<(u64, String, bool)> = self
             .doc
             .shapes
             .iter()
-            .map(|s| (s.id, s.name.clone()))
+            .map(|s| (s.id, s.name.clone(), s.parent.is_some()))
             .collect();
         if shapes.is_empty() {
             ui.weak("Aucune forme. Tracez-en une sur le canevas.");
@@ -2633,7 +2912,7 @@ impl TraceryApp {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for (id, name) in shapes {
+                for (id, name, child) in shapes {
                     let design = self.design_of(id);
                     let visible = !self.hidden_shapes.contains(&id);
                     let cid = ui.make_persistent_id(("objet", id));
@@ -2644,6 +2923,10 @@ impl TraceryApp {
                     );
                     state
                         .show_header(ui, |ui| {
+                            if child {
+                                // ouverture d'une façade : sous elle
+                                ui.add_space(10.0);
+                            }
                             let mut v = visible;
                             if ui
                                 .checkbox(&mut v, "")
@@ -3141,7 +3424,7 @@ impl TraceryApp {
                 painter.add(Shape::line(v, Stroke::new(1.5, ACCENT)));
             }
             Drag::Prim { start, cur } => {
-                if let Tool::Prim(kind) = self.tool {
+                if let Some(kind) = self.tool.prim_kind() {
                     let spec = PrimSpec {
                         kind,
                         center: (*start + *cur) * 0.5,
@@ -3252,7 +3535,7 @@ impl TraceryApp {
                 }
             }
             Tool::Freehand => Drag::Stroke(vec![p]),
-            Tool::Prim(_) => Drag::Prim { start: p, cur: p },
+            Tool::Prim(_) | Tool::Facade => Drag::Prim { start: p, cur: p },
             Tool::Polygon => Drag::None,
         };
     }
@@ -3321,7 +3604,7 @@ impl TraceryApp {
             },
             Drag::Prim { start, cur } => {
                 let (w, h) = ((cur.x - start.x).abs(), (cur.y - start.y).abs());
-                if let Tool::Prim(kind) = self.tool
+                if let Some(kind) = self.tool.prim_kind()
                     && w * self.cam.scale > 6.0
                     && h * self.cam.scale > 6.0
                 {
@@ -3332,7 +3615,11 @@ impl TraceryApp {
                         h,
                         angle: 0.0,
                     };
-                    self.add_shape(&kind.label(), Some(spec), None);
+                    if self.tool == Tool::Facade {
+                        self.add_facade(spec);
+                    } else {
+                        self.add_shape(&kind.label(), Some(spec), None);
+                    }
                     self.tool = Tool::Select;
                 }
             }

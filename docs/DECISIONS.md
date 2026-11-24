@@ -845,3 +845,89 @@ restent des polylignes calculées une fois à la tolérance du document :
 à très fort zoom, leurs arcs montrent des facettes. L'auto-test
 `TRACERY_SMOKE_ZOOM=k[,fx,fy]` grossit la vue k fois sur le point (fx, fy)
 de la boîte du contenu, pour mesurer avec `TRACERY_PERF`.
+
+## ADR-32 — Façades gothiques (v0.8.0)
+
+**Contexte.** Le commanditaire veut tracer un rectangle et obtenir une
+façade de logis de la fin du gothique (photos du château des ducs de
+Bretagne, du palais Jacques-Cœur, d'hôtels de Meaux et de Rouen) : des
+fenêtres sur chaque niveau, de même style sur un même niveau, des portes
+en ogive, une corniche en haut, d'autres entre les étages, un toit à
+lucarnes gothiques, des tours hexagonales ou octogonales qui montent d'un
+étage de plus pour l'accès aux toits, des échauguettes aux angles ; les
+fenêtres et portes doivent rester modifiables une à une, comme si on les
+avait tracées soi-même, et ne pas être espacées trop régulièrement.
+
+**Décision.** Un nouvel ouvrage « Façade » (`StyleParams::facade`,
+catégorie et type dans le panneau, outil « Façade », raccourci H) et un
+module `engine::facade` en deux parties.
+
+- **Plan** (`facade::plan`, déterminé par la boîte et le génome, sel
+  `0xFACA`) : 1 à 6 étages selon les proportions (ou imposés),
+  rez-de-chaussée 1,12 à 1,3 fois plus haut. Travées de largeurs inégales
+  (0,72 à 1,3 fois la moyenne, en miroir une fois sur deux) entre deux
+  trumeaux d'angle. Chaque niveau a un génome de croisée (seed dérivée du
+  niveau, croisée, angles hauts) et une taille communs à toutes ses
+  fenêtres, bornée par la plus étroite des travées ; les portes (arc
+  tiers-point ou lancette, génome commun d'encadrement de porte) vont sur
+  la travée du milieu, parfois sur une paire symétrique. Zéro, une (trois
+  travées au moins) ou deux tours (cinq au moins), à 6 ou 8 pans dont un
+  fait face, posées sur une travée dont elles prennent les ouvertures (une
+  petite croisée par niveau, une porte au pied une fois sur deux, un étage
+  de plus au-dessus de la corniche) ; leur largeur laisse passer le décor
+  des travées voisines et leurs murs s'arrêtent vers le faîtage. Le toit
+  à croupes (0,8 à 1,05 étage, exhaussé de la balustrade) porte des
+  lucarnes sur chaque travée sans tour, ou une sur deux, hors des
+  croupes ; leurs croisées, de même génome, sont sans couronnement
+  (`StyleParams::plain_top` : ni accolade ni larmier, le gâble en tient
+  lieu) et prennent la largeur de celles du dernier étage. Échauguettes
+  à un angle, aux deux ou à aucun (dès deux niveaux) : le trumeau d'angle
+  est élargi pour qu'aucun décor de fenêtre ou de lucarne ne passe
+  dessous, et aucune tour n'est alors posée sur la travée d'angle. Les
+  ouvertures sont réduites, du haut vers le bas, pour que leur décor
+  tienne sous le cordon ou l'appui du niveau supérieur et sous la
+  corniche : encombrements mesurés sur 80 seeds par l'exemple
+  `encombrement` du moteur (croisée : 0,93 largeur au-dessus, 0,18 en
+  dessous, 0,22 de côté ; porte : 2,06 portées au-dessus de la clé, 0,34
+  de côté), arrondis vers le haut.
+- **Décor du mur** (`generate_facade`, un ornement de porte comme les
+  autres, rendu par niveaux de relief) : mur (niveau 0), soubassement
+  interrompu aux portes, cordons sous les appuis des étages (partout, un
+  sur deux en moyenne ou aucun, ou imposés), corniche (frise, arcature
+  aveugle en arcs brisés, modillons à trois ressauts et culot, bandeau à
+  gorge, larmier débordant), balustrade à quadrilobes, dés et main
+  courante (moins d'une fois sur deux) ; toit couvert d'assises
+  d'ardoise, crête de faîtage et épis ; lucarnes : front entre deux
+  jambages, gâble à rampants moulurés débordants, trilobe aveugle, croix
+  d'épi, pinacles de part et d'autre (ceux des portes). Le toit et les
+  moulures s'arrêtent à la silhouette des tours et des échauguettes. Tours
+  et échauguettes : pans en relief 1 (arêtes vues en épure, gravées en
+  rendu pierre hors du décor des ouvertures), corniche à consoles, puis
+  flèche à pans couverte d'assises, arêtiers et croix d'épi, ou parapet
+  crénelé ; les tours ont une base et des bandeaux aux planchers, les
+  échauguettes un cul-de-lampe (cône à pans cerclé de trois moulures,
+  culot) et une archère.
+
+L'application crée les ouvertures du plan comme des formes ordinaires
+(rectangle ou arc, génome du plan), liées à leur façade (`parent`).
+La façade garde la signature de son plan (taille, orientation, génome,
+sans la position) et sa position à leur création (`spawned`) : quand
+elle se déplace, ses ouvertures la suivent ; quand son plan change (taille
+au relâchement de la poignée, seed, réglages, « Recréer les
+ouvertures »), elles sont recréées ; supprimer, copier ou dupliquer une
+façade emporte ses ouvertures. Le lien et la signature sont enregistrés
+dans les données de l'application du fichier projet. Les ouvertures,
+après la façade dans le document, se dessinent devant elle et se
+sélectionnent d'un clic. Une croisée peut perdre son couronnement
+(case « Couronnement » du panneau) ; le tirage de la seed est fait quand
+même, les autres croisées ne changent pas.
+
+**Conséquences.** Une façade de 22 × 14 m : quelques millisecondes de
+plan et de décor, quelques dizaines de traits vus, 10 à 26 ouvertures
+générées en parallèle chacune par son générateur. Modifier une ouverture
+puis changer la taille ou la seed de sa façade efface cette modification
+(recréation annulable). Les seeds dorées ne changent pas.
+Planche `docs/planches/v08_facade.png`.
+
+**À venir.** Tours rondes ; fenêtres décalées des tours d'escalier ;
+cheminées.
